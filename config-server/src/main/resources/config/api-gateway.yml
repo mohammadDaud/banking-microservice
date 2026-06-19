@@ -1,0 +1,222 @@
+server:
+  port: 8080
+
+spring:
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - "http://localhost:4200"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+            allowedHeaders:
+              - "*"
+            allowCredentials: true
+      routes:
+
+        # AUTH SERVICE
+        - id: auth-service
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/auth/**
+
+        # USER SERVICE
+        - id: user-service
+          uri: lb://user-service
+          predicates:
+            - Path=/api/users/**
+
+        # ACCOUNT SERVICE
+        - id: account-service
+          uri: lb://account-service
+          predicates:
+            - Path=/api/accounts/**
+
+        # ACCOUNT NUMBER GENERATOR
+        - id: accountnumbergen-service
+          uri: lb://accountnumbergen-service
+          predicates:
+            - Path=/api/sequences/**
+
+        # BENEFICIARY SERVICE
+        - id: beneficiary-service
+          uri: lb://beneficiary-service
+          predicates:
+            - Path=/api/beneficiaries/**
+
+        # KYC SERVICE
+        - id: kyc-service
+          uri: lb://kyc-service
+          predicates:
+            - Path=/api/kyc/**
+
+        # NOMINEE SERVICE
+        - id: nominee-service
+          uri: lb://nominee-service
+          predicates:
+            - Path=/api/nominees/**
+
+        # TRANSACTION SERVICE
+        - id: transaction-service
+          uri: lb://transaction-service
+          predicates:
+            - Path=/api/transactions/**
+
+        # NOTIFICATION SERVICE
+        - id: notification-service
+          uri: lb://notification-service
+          predicates:
+            - Path=/api/notifications/**
+
+        # AUDIT LOG SERVICE
+        - id: audit-log-service
+          uri: lb://audit-log-service
+          predicates:
+            - Path=/api/audit/**
+
+        ##################################################
+        # SWAGGER ROUTES
+        ##################################################
+
+        - id: auth-swagger
+          uri: lb://auth-service
+          predicates:
+            - Path=/auth/**
+          filters:
+            - RewritePath=/auth/(?<segment>.*), /${segment}
+
+        - id: user-swagger
+          uri: lb://user-service
+          predicates:
+            - Path=/user/**
+          filters:
+            - RewritePath=/user/(?<segment>.*), /${segment}
+
+        - id: account-swagger
+          uri: lb://account-service
+          predicates:
+            - Path=/account/**
+          filters:
+            - RewritePath=/account/(?<segment>.*), /${segment}
+
+        - id: beneficiary-swagger
+          uri: lb://beneficiary-service
+          predicates:
+            - Path=/beneficiary/**
+          filters:
+            - RewritePath=/beneficiary/(?<segment>.*), /${segment}
+
+        - id: kyc-swagger
+          uri: lb://kyc-service
+          predicates:
+            - Path=/kyc/**
+          filters:
+            - RewritePath=/kyc/(?<segment>.*), /${segment}
+
+        - id: nominee-swagger
+          uri: lb://nominee-service
+          predicates:
+            - Path=/nominee/**
+          filters:
+            - RewritePath=/nominee/(?<segment>.*), /${segment}
+
+        - id: transaction-swagger
+          uri: lb://transaction-service
+          predicates:
+            - Path=/transaction/**
+          filters:
+            - RewritePath=/transaction/(?<segment>.*), /${segment}
+
+        - id: notification-swagger
+          uri: lb://notification-service
+          predicates:
+            - Path=/notification/**
+          filters:
+            - RewritePath=/notification/(?<segment>.*), /${segment}
+
+        - id: audit-swagger
+          uri: lb://audit-log-service
+          predicates:
+            - Path=/audit/**
+          filters:
+            - RewritePath=/audit/(?<segment>.*), /${segment}
+
+jwt:
+  secret: F7wez7S50RGr2wIvJ03oUPDOzvxmsEQZROunPOg/Jiem3q8sOIAUtsYaM41yzcIMCxkG8yag874v3Ae1foB4/A==
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://discovery-service:8761/eureka/
+
+  instance:
+    prefer-ip-address: true
+
+
+springdoc:
+  api-docs:
+    enabled: true
+
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    disable-swagger-default-url: true
+    urls:
+      - name: Auth Service
+        url: /auth/v3/api-docs
+
+      - name: User Service
+        url: /user/v3/api-docs
+
+      - name: Account Service
+        url: /account/v3/api-docs
+
+      - name: Beneficiary Service
+        url: /beneficiary/v3/api-docs
+
+      - name: KYC Service
+        url: /kyc/v3/api-docs
+
+      - name: Nominee Service
+        url: /nominee/v3/api-docs
+
+      - name: Transaction Service
+        url: /transaction/v3/api-docs
+
+      - name: Notification Service
+        url: /notification/v3/api-docs
+
+      - name: Audit Service
+        url: /audit/v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,gateway
+  endpoint:
+    gateway:
+      enabled: true
+    health:
+      show-details: always
+
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+info:
+  app:
+    name: API Gateway
+    version: 1.0.0
+    description: Banking API Gateway

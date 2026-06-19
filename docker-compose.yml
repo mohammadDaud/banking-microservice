@@ -1,0 +1,278 @@
+version: '3.9'
+
+services:
+  #===========================================SQL=========================================#
+  postgres:
+    image: postgres:17
+    container_name: postgres
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./dockers/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - banking-network
+  #===========================================ZOOKEEPER====================================#
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - banking-network
+  #===========================================Kafka=========================================#
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - banking-network
+
+  #===========================================PROMETHEUS======================================#
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - banking-network
+  #===========================================GRAFANA=========================================#
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin@2026
+
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    networks:
+      - banking-network
+  #========================= EUREKA =========================
+
+  discovery-service:
+    build:
+      context: ./discovery-service
+    container_name: discovery-service
+    ports:
+      - "8761:8761"
+    networks:
+      - banking-network
+
+  #========================= CONFIG SERVER =========================
+
+  config-server:
+    build:
+      context: ./config-server
+    container_name: config-server
+    depends_on:
+      - discovery-service
+    ports:
+      - "8888:8888"
+    networks:
+      - banking-network
+
+  #========================= API GATEWAY =========================
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+    container_name: api-gateway
+    depends_on:
+      - discovery-service
+      - config-server
+    ports:
+      - "8080:8080"
+    networks:
+      - banking-network
+  #========================= AUTH SERVICE =========================
+
+  auth-service:
+    build:
+      context: ./auth-service
+    container_name: auth-service
+    depends_on:
+      - postgres
+      - kafka
+      - discovery-service
+      - config-server
+    ports:
+      - "8081:8081"
+    networks:
+      - banking-network
+
+  #========================= AUDIT LOG SERVICE =========================
+
+  audit-log-service:
+    build:
+      context: ./audit-log-service
+    container_name: audit-log-service
+    depends_on:
+      - postgres
+      - kafka
+      - discovery-service
+      - config-server
+    ports:
+      - "8091:8091"
+    networks:
+      - banking-network
+
+  #========================= BENEFICIARY SERVICE =========================
+
+  beneficiary-service:
+    build:
+      context: ./beneficiary-service
+    container_name: beneficiary-service
+    depends_on:
+      - postgres
+      - kafka
+      - discovery-service
+      - config-server
+    ports:
+      - "8090:8090"
+    networks:
+      - banking-network
+
+  #========================= KYC SERVICE =========================
+
+  kyc-service:
+    build:
+      context: ./kyc-service
+    container_name: kyc-service
+    depends_on:
+      - postgres
+      - kafka
+      - discovery-service
+      - config-server
+    ports:
+      - "8086:8086"
+    networks:
+      - banking-network
+
+  #========================= NOMINEE SERVICE =========================
+
+  nominee-service:
+    build:
+      context: ./nominee-service
+    container_name: nominee-service
+    depends_on:
+      - postgres
+      - kafka
+      - discovery-service
+      - config-server
+    ports:
+      - "8087:8087"
+    networks:
+      - banking-network
+
+  #========================= NOTIFICATION SERVICE =========================
+
+  notification-service:
+    build:
+      context: ./notification-service
+    container_name: notification-service
+    depends_on:
+      - kafka
+      - discovery-service
+      - config-server
+    ports:
+      - "8082:8082"
+    networks:
+      - banking-network
+
+
+
+  #========================= ACCOUNT SERVICE =========================
+
+  account-service:
+    build:
+      context: ./account-service
+    container_name: account-service
+    depends_on:
+      - postgres
+      - kafka
+      - discovery-service
+      - config-server
+    ports:
+      - "8084:8084"
+    networks:
+      - banking-network
+
+  #========================= ACCOUNT NUMBER GEN SERVICE =========================
+
+  accountnumbergen-service:
+    build:
+      context: ./accountnumbergen-service
+    container_name: accountnumbergen-service
+    depends_on:
+      - postgres
+      - kafka
+      - discovery-service
+      - config-server
+    ports:
+      - "8083:8083"
+    networks:
+      - banking-network
+
+  #========================= TRANSACTION SERVICE =========================
+
+  transaction-service:
+    build:
+      context: ./transaction-service
+    container_name: transaction-service
+    depends_on:
+      - postgres
+      - kafka
+      - discovery-service
+      - config-server
+    ports:
+      - "8089:8089"
+    networks:
+      - banking-network
+
+  #========================= USER SERVICE =========================
+
+  user-service:
+    build:
+      context: ./user-service
+    container_name: user-service
+    depends_on:
+      - postgres
+      - kafka
+      - discovery-service
+      - config-server
+    ports:
+      - "8085:8085"
+    networks:
+      - banking-network
+
+
+volumes:
+  postgres-data:
+
+networks:
+  banking-network:
+    driver: bridge

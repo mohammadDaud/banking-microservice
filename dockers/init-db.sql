@@ -1,0 +1,10 @@
+CREATE DATABASE auth_db;
+CREATE DATABASE user_db;
+CREATE DATABASE account_db;
+CREATE DATABASE account_number_db;
+CREATE DATABASE beneficiary_db;
+CREATE DATABASE kyc_db;
+CREATE DATABASE nominee_db;
+CREATE DATABASE transaction_db;
+CREATE DATABASE notification_db;
+CREATE DATABASE audit_log_db;
