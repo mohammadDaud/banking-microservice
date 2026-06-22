@@ -28,6 +28,7 @@
         <module>transaction-service</module>
         <module>beneficiary-service</module>
         <module>audit-log-service</module>
+        <module>rule-engine-service</module>
 
     </modules>
 	<properties>

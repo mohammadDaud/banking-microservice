@@ -1,5 +1,6 @@
 package com.bank.controller;
 
+import com.bank.dtos.BeneficiaryApprovalRequest;
 import com.bank.dtos.BeneficiaryResponse;
 import com.bank.service.BeneficiaryService;
 import lombok.RequiredArgsConstructor;
@@ -20,13 +21,13 @@ public class AdminBeneficiaryController {
     }
 
     @PutMapping("/{id}/approve")
-    public BeneficiaryResponse approve(@PathVariable String id) {
-        return service.approveBeneficiary(id);
+    public BeneficiaryResponse approve(@PathVariable String id, @RequestBody BeneficiaryApprovalRequest request) {
+        return service.approveBeneficiary(id, request);
     }
 
     @PutMapping("/{id}/reject")
-    public BeneficiaryResponse reject(@PathVariable String id) {
-        return service.rejectBeneficiary(id);
+    public BeneficiaryResponse reject(@PathVariable String id, @RequestBody BeneficiaryApprovalRequest request) {
+        return service.rejectBeneficiary(id, request);
     }
 
     @GetMapping("/count")

@@ -1,9 +1,6 @@
 package com.bank.service;
 
-import com.bank.dtos.AmountTransactionRequest;
-import com.bank.dtos.StatementTransactionResponse;
-import com.bank.dtos.TransactionResponse;
-import com.bank.dtos.TransferRequest;
+import com.bank.dtos.*;
 import com.bank.model.Transaction;
 import org.springframework.data.domain.PageRequest;
 
@@ -18,19 +15,22 @@ public interface TransactionService {
     TransactionResponse transfer(TransferRequest request);
     List<TransactionResponse> getCustomerTransactions(String customerId);
     List<TransactionResponse> getAccountTransactions(String accountNumber);
-    public Long getTransactionCount(String customerId);
-    public List<TransactionResponse> getRecentTransactions(String customerId);
+    Long getTransactionCount(String customerId);
+    List<TransactionResponse> getRecentTransactions(String customerId);
     List<TransactionResponse> getAllTransactions();
 
     Long countTodayTransactions();
 
     List<Object[]> getMonthlyStats();
 
-   List<Transaction> findAllByOrderByTransactionDateDesc(PageRequest of);
+    List<Transaction> findAllByOrderByTransactionDateDesc(PageRequest of);
 
     List<StatementTransactionResponse>
-    findBySourceAccountAndTransactionDateBetweenOrderByTransactionDateDesc(
-            String accountNumber,
-            LocalDate fromDate,
-            LocalDate toDate);
+    findBySourceAccountAndTransactionDateBetweenOrderByTransactionDateDesc(String accountNumber,LocalDate fromDate,LocalDate toDate);
+
+    TransactionResponse approvePendingTransaction(String transactionId,CheckerActionRequest request);
+
+    TransactionResponse rejectPendingTransaction(String transactionId,CheckerActionRequest request);
+
+    List<TransactionResponse> getPendingApprovalTransactions();
 }

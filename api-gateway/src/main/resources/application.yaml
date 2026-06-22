@@ -20,15 +20,14 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus,gateway
+
   endpoint:
-    endpoint:
-      gateway:
-        enabled: true
+    gateway:
+      access: unrestricted
+
     health:
       show-details: always
-  info:
-    env:
-      enabled: true
+
   prometheus:
     metrics:
       export:

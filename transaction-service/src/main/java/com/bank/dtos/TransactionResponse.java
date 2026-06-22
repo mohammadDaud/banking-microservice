@@ -12,6 +12,8 @@ import java.time.LocalDateTime;
 @Builder
 public class TransactionResponse {
 
+    private String id;
+
     private String transactionReference;
 
     private String sourceAccount;
@@ -27,4 +29,11 @@ public class TransactionResponse {
     private String description;
 
     private LocalDateTime transactionDate;
+
+    private String makerId;
+    private String checkerId;
+    private String checkerRemarks;
+    private LocalDateTime checkerActionAt;
+    private String ruleCode;
+    private String ruleReason;
 }

@@ -17,8 +17,6 @@ public interface TransactionRepository  extends JpaRepository<Transaction,String
 
     List<Transaction> findBySourceAccountOrderByTransactionDateDesc(String accountNumber);
 
-    Optional<Transaction> findByTransactionReference(String transactionReference);
-
     Long countByCustomerId(String customerId);
 
     List<Transaction> findTop5ByCustomerIdOrderByCreatedAtDesc(String customerId);
@@ -50,36 +48,40 @@ public interface TransactionRepository  extends JpaRepository<Transaction,String
     List<Transaction> findBySourceAccountAndTransactionDateBetweenOrderByTransactionDateDesc(
             String accountNumber, LocalDateTime from, LocalDateTime to);
 
-            @Query("""
-        SELECT COALESCE(SUM(t.amount),0)
-        FROM Transaction t
-        WHERE t.sourceAccount = :accountNumber
-        AND t.transactionDate >= :start
-        AND t.transactionDate < :end
-        AND t.transactionStatus='SUCCESS'
-        """)
+    @Query("""
+    SELECT COALESCE(SUM(t.amount),0)
+    FROM Transaction t
+    WHERE t.sourceAccount = :accountNumber
+    AND t.transactionDate >= :start
+    AND t.transactionDate < :end
+    AND t.transactionStatus='SUCCESS'
+    """)
     BigDecimal getTodayTransferAmount(String accountNumber,LocalDateTime start,LocalDateTime end);
 
-            @Query("""
-        SELECT COALESCE(SUM(t.amount),0)
-        FROM Transaction t
-        WHERE t.sourceAccount = :accountNumber
-        AND t.transactionDate >= :start
-        AND t.transactionDate < :end
-        AND t.transactionStatus='SUCCESS'
-        """)
+        @Query("""
+    SELECT COALESCE(SUM(t.amount),0)
+    FROM Transaction t
+    WHERE t.sourceAccount = :accountNumber
+    AND t.transactionDate >= :start
+    AND t.transactionDate < :end
+    AND t.transactionStatus='SUCCESS'
+    """)
     BigDecimal getMonthlyTransferAmount(String accountNumber,LocalDateTime start,LocalDateTime end);
     long countByTransactionDateBetween(LocalDateTime start,LocalDateTime end);
 
-            @Query("""
-        SELECT COALESCE(SUM(t.amount),0)
-        FROM Transaction t
-        WHERE t.transactionDate
-        BETWEEN :start AND :end
-        """)
+        @Query("""
+    SELECT COALESCE(SUM(t.amount),0)
+    FROM Transaction t
+    WHERE t.transactionDate
+    BETWEEN :start AND :end
+    """)
     BigDecimal getTotalAmount(LocalDateTime start,LocalDateTime end);
     long countByTransactionStatus(TransactionStatus status);
     List<Transaction> findByTransactionDateBetweenOrderByTransactionDateDesc(LocalDateTime start,LocalDateTime end);
 
     List<Transaction> findByAmountGreaterThan(BigDecimal amount);
+
+    List<Transaction> findByTransactionStatusOrderByCreatedAtDesc(TransactionStatus transactionStatus);
+
+    Optional<Transaction> findByIdAndTransactionStatus(String id, TransactionStatus transactionStatus);
 }

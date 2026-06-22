@@ -85,6 +85,12 @@ spring:
           predicates:
             - Path=/api/audit/**
 
+        # RULE ENGINE SERVICE
+        - id: rule-engine-service
+          uri: lb://rule-engine-service
+          predicates:
+            - Path=/api/rule/**
+
         ##################################################
         # SWAGGER ROUTES
         ##################################################
@@ -152,6 +158,13 @@ spring:
           filters:
             - RewritePath=/audit/(?<segment>.*), /${segment}
 
+        - id: rule-swagger
+          uri: lb://rule-engine-service
+          predicates:
+            - Path=/rule/**
+          filters:
+            - RewritePath=/rule/(?<segment>.*), /${segment}
+
 jwt:
   secret: F7wez7S50RGr2wIvJ03oUPDOzvxmsEQZROunPOg/Jiem3q8sOIAUtsYaM41yzcIMCxkG8yag874v3Ae1foB4/A==
 
@@ -200,14 +213,19 @@ springdoc:
       - name: Audit Service
         url: /audit/v3/api-docs
 
+      - name: Rule Service
+        url: /rule/v3/api-docs
+
 management:
   endpoints:
     web:
       exposure:
         include: health,info,metrics,prometheus,gateway
+
   endpoint:
     gateway:
-      enabled: true
+      access: unrestricted
+
     health:
       show-details: always
 
@@ -215,6 +233,7 @@ management:
     metrics:
       export:
         enabled: true
+
 info:
   app:
     name: API Gateway

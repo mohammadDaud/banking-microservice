@@ -4,7 +4,8 @@ import com.bank.client.NotificationClient;
 import com.bank.common.events.AuditEvent;
 import com.bank.common.events.NotificationEvent;
 import com.bank.common.topics.KafkaTopics;
-import com.bank.dtos.CreateKycRequest;
+import com.bank.dtos.KycApprovalRequest;
+import com.bank.dtos.KycEligibilityResponse;
 import com.bank.dtos.KycResponse;
 import com.bank.dtos.NotificationRequest;
 import com.bank.enums.KycStatus;
@@ -15,12 +16,12 @@ import com.bank.model.KycProfile;
 import com.bank.repository.KycRepository;
 import com.bank.service.FileStorageService;
 import com.bank.service.KycService;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
-import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -41,99 +42,153 @@ public class KycServiceImpl implements KycService {
             MultipartFile panDocument,
             MultipartFile aadhaarDocument) {
 
-        if(repository.existsByUserId(userId)) {
+        if (repository.existsByUserId(userId)) {
             throw new KycAlreadyExistsException("KYC already submitted");
         }
 
-        String panPath =
-                fileStorageService.store(panDocument);
-        String aadhaarPath =
-                fileStorageService.store(aadhaarDocument);
+        String panPath = fileStorageService.store(panDocument);
+        String aadhaarPath = fileStorageService.store(aadhaarDocument);
 
-        KycProfile profile =
-                KycProfile.builder()
-                        .id(UUID.randomUUID().toString())
-                        .userId(userId)
-                        .panNumber(panNumber)
-                        .aadhaarNumber(aadhaarNumber)
-                        .panDocumentPath(panPath)
-                        .aadhaarDocumentPath(aadhaarPath)
-                        .kycStatus(KycStatus.PENDING)
-                        .createdAt(LocalDateTime.now())
-                        .updatedAt(LocalDateTime.now())
-                        .build();
+        LocalDateTime now = LocalDateTime.now();
+
+        KycProfile profile = KycProfile.builder()
+                .id(UUID.randomUUID().toString())
+                .userId(userId)
+                .makerId(userId)
+                .panNumber(panNumber)
+                .aadhaarNumber(aadhaarNumber)
+                .panDocumentPath(panPath)
+                .aadhaarDocumentPath(aadhaarPath)
+                .kycStatus(KycStatus.PENDING)
+                .submittedAt(now)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+
         repository.save(profile);
 
         notificationClient.createNotification(
-                NotificationRequest
-                        .builder()
+                NotificationRequest.builder()
                         .userId(profile.getUserId())
                         .title("KYC Submitted")
-                        .message("Your KYC request submitted")
+                        .message("Your KYC request has been submitted for approval")
                         .build()
         );
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
-                AuditEvent.builder()
-                        .userId(profile.getUserId())
-                        .username(null)
-                        .role("ROLE_CUSTOMER")
-                        .module("KYC")
-                        .action("KYC_SUBMITTED")
-                        .entityId(profile.getId())
-                        .entityType("KYC")
-                        .ipAddress("127.0.0.1")
-                        .description("Your KYC request submitted!")
-                        .createdAt(LocalDateTime.now())
+        publishAudit(
+                profile.getMakerId(),
+                "ROLE_MAKER",
+                "KYC_SUBMITTED_FOR_APPROVAL",
+                profile,
+                "KYC submitted for checker review"
+        );
+        return map(profile);
+    }
+
+    @Override
+    @Transactional
+    public KycResponse resubmitKyc(
+            String userId,
+            String panNumber,
+            String aadhaarNumber,
+            MultipartFile panDocument,
+            MultipartFile aadhaarDocument) {
+
+        KycProfile profile = getProfile(userId);
+
+        if (profile.getKycStatus() != KycStatus.REJECTED) {
+            throw new IllegalStateException("Only REJECTED KYC can be resubmitted");
+        }
+
+        String panPath = fileStorageService.store(panDocument);
+        String aadhaarPath = fileStorageService.store(aadhaarDocument);
+        LocalDateTime now = LocalDateTime.now();
+
+        profile.setPanNumber(panNumber);
+        profile.setAadhaarNumber(aadhaarNumber);
+        profile.setPanDocumentPath(panPath);
+        profile.setAadhaarDocumentPath(aadhaarPath);
+
+        // New maker request: reset prior checker decision
+        profile.setKycStatus(KycStatus.PENDING);
+        profile.setMakerId(userId);
+        profile.setCheckerId(null);
+        profile.setCheckerRemark(null);
+        profile.setRemarks(null);
+        profile.setSubmittedAt(now);
+        profile.setReviewedAt(null);
+        profile.setApprovedAt(null);
+        profile.setRejectedAt(null);
+        profile.setUpdatedAt(now);
+
+        repository.save(profile);
+
+        publishAudit(
+                userId,
+                "ROLE_MAKER",
+                "KYC_RESUBMITTED_FOR_APPROVAL",
+                profile,
+                "KYC resubmitted after rejection"
+        );
+
+        notificationClient.createNotification(
+                NotificationRequest.builder()
+                        .userId(userId)
+                        .title("KYC Resubmitted")
+                        .message("Your corrected KYC documents were submitted for approval")
                         .build()
         );
+
         return map(profile);
     }
 
     @Override
     public KycResponse getKyc(String userId) {
-        KycProfile profile =
-                repository
-                        .findByUserId(userId)
-                        .orElseThrow(() -> new KycNotFoundException("KYC not found"));
-        return map(profile);
+        return map(getProfile(userId));
     }
 
+    /**
+     * CHECKER ACTION:
+     * Only UNDER_REVIEW KYC can be approved.
+     * The checker assigned during review must approve it.
+     */
     @Override
-    public KycResponse approveKyc(String userId) {
-        KycProfile profile =
-                repository
-                        .findByUserId(userId)
-                        .orElseThrow(() -> new KycNotFoundException("KYC not found"));
-        validateKycAction(profile);
-        if(profile.getKycStatus()== KycStatus.PENDING) {
-            throw new KycAlreadyExistsException("Move KYC to UNDER_REVIEW before approval");
+    @Transactional
+    public KycResponse approveKyc(String userId, KycApprovalRequest request) {
+
+        KycProfile profile = getProfile(userId);
+
+        if (profile.getKycStatus() != KycStatus.UNDER_REVIEW) {
+            throw new IllegalStateException("Only UNDER_REVIEW KYC can be approved");
         }
+
+        validateMakerChecker(profile, request.getCheckerId());
+        validateAssignedChecker(profile, request.getCheckerId());
+
+        LocalDateTime now = LocalDateTime.now();
+
         profile.setKycStatus(KycStatus.APPROVED);
-        profile.setUpdatedAt(LocalDateTime.now());
+        profile.setCheckerRemark(request.getRemark());
+        profile.setApprovedAt(now);
+        profile.setUpdatedAt(now);
+
         repository.save(profile);
+
         notificationClient.createNotification(
-                NotificationRequest
-                        .builder()
+                NotificationRequest.builder()
                         .userId(profile.getUserId())
                         .title("KYC Approved")
-                        .message("Your KYC approved successfully")
+                        .message("Your KYC has been approved successfully")
                         .build()
         );
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
-                AuditEvent.builder()
-                        .userId(profile.getUserId())
-                        .username(null)
-                        .role("ROLE_CUSTOMER")
-                        .module("KYC")
-                        .action("KYC_APPROVED")
-                        .entityId(profile.getId())
-                        .entityType("KYC")
-                        .ipAddress("127.0.0.1")
-                        .description("Your KYC approved successfully")
-                        .createdAt(LocalDateTime.now())
-                        .build()
+
+        publishAudit(request.getCheckerId(),
+                "ROLE_CHECKER",
+                "KYC_APPROVED",
+                profile, "KYC approved by checker. Remark: " + request.getRemark()
         );
-        kafkaEventPublisher.publish(KafkaTopics.NOTIFICATION_TOPIC,
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.NOTIFICATION_TOPIC,
                 NotificationEvent.builder()
                         .userId(profile.getUserId())
                         .title("KYC Approved")
@@ -142,82 +197,186 @@ public class KycServiceImpl implements KycService {
                         .priority("HIGH")
                         .build()
         );
+
         return map(profile);
     }
 
+    /**
+     * CHECKER ACTION:
+     * Only UNDER_REVIEW KYC can be rejected.
+     */
     @Override
-    public KycResponse rejectKyc(String userId,String remarks) {
-        KycProfile profile =
-                repository
-                        .findByUserId(userId)
-                        .orElseThrow(() -> new KycNotFoundException("KYC not found"));
-        validateKycAction(profile);
-        if(profile.getKycStatus()== KycStatus.PENDING) {
-            throw new KycAlreadyExistsException("Move KYC to UNDER_REVIEW before rejection");
+    @Transactional
+    public KycResponse rejectKyc(String userId, KycApprovalRequest request) {
+
+        KycProfile profile = getProfile(userId);
+        if (profile.getKycStatus() != KycStatus.UNDER_REVIEW) {
+            throw new IllegalStateException("Only UNDER_REVIEW KYC can be rejected");
         }
+
+        validateMakerChecker(profile, request.getCheckerId());
+        validateAssignedChecker(profile, request.getCheckerId());
+
+        LocalDateTime now = LocalDateTime.now();
+
         profile.setKycStatus(KycStatus.REJECTED);
-        profile.setRemarks(remarks);
-        profile.setUpdatedAt(LocalDateTime.now());
+        profile.setRemarks(request.getRemark());
+        profile.setCheckerRemark(request.getRemark());
+        profile.setRejectedAt(now);
+        profile.setUpdatedAt(now);
+
         repository.save(profile);
+
         notificationClient.createNotification(
-                NotificationRequest
-                        .builder()
+                NotificationRequest.builder()
                         .userId(profile.getUserId())
                         .title("KYC Rejected")
-                        .message("Your KYC request rejected")
+                        .message("Your KYC was rejected. Reason: " + request.getRemark())
                         .build()
         );
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
-                AuditEvent.builder()
+
+        publishAudit(
+                request.getCheckerId(),
+                "ROLE_CHECKER",
+                "KYC_REJECTED",
+                profile,
+                "KYC rejected by checker. Remark: " + request.getRemark()
+        );
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.NOTIFICATION_TOPIC,
+                NotificationEvent.builder()
                         .userId(profile.getUserId())
-                        .username(null)
-                        .role("ROLE_CUSTOMER")
-                        .module("KYC")
-                        .action("KYC_REJECTED")
-                        .entityId(profile.getId())
-                        .entityType("KYC")
-                        .ipAddress("127.0.0.1")
-                        .description("Your KYC request rejected!")
-                        .createdAt(LocalDateTime.now())
+                        .title("KYC Rejected")
+                        .message("Your KYC was rejected. Reason: " + request.getRemark())
+                        .type("KYC")
+                        .priority("HIGH")
                         .build()
         );
+
         return map(profile);
     }
 
+    /**
+     * CHECKER ACTION:
+     * Only PENDING KYC can move to UNDER_REVIEW.
+     */
     @Override
-    public KycResponse reviewKyc(String userId) {
-        KycProfile profile =
-                repository
-                        .findByUserId(userId)
-                        .orElseThrow(
-                                () -> new KycNotFoundException("KYC not found"));
-        validateKycAction(profile);
-        if(profile.getKycStatus() == KycStatus.UNDER_REVIEW) {
-            throw new KycAlreadyExistsException("KYC already under review");
+    @Transactional
+    public KycResponse reviewKyc(
+            String userId,
+            KycApprovalRequest request) {
+
+        KycProfile profile = getProfile(userId);
+
+        if (profile.getKycStatus() != KycStatus.PENDING) {
+            throw new IllegalStateException(
+                    "Only PENDING KYC can move to UNDER_REVIEW"
+            );
         }
+
+        validateMakerChecker(profile, request.getCheckerId());
+
+        LocalDateTime now = LocalDateTime.now();
+
         profile.setKycStatus(KycStatus.UNDER_REVIEW);
-        profile.setUpdatedAt(LocalDateTime.now());
+        profile.setCheckerId(request.getCheckerId());
+        profile.setCheckerRemark(request.getRemark());
+        profile.setReviewedAt(now);
+        profile.setUpdatedAt(now);
+
         repository.save(profile);
+
+        publishAudit(
+                request.getCheckerId(),
+                "ROLE_CHECKER",
+                "KYC_MOVED_TO_UNDER_REVIEW",
+                profile,
+                "KYC moved to under review. Remark: " + request.getRemark()
+        );
+
+        notificationClient.createNotification(
+                NotificationRequest.builder()
+                        .userId(profile.getUserId())
+                        .title("KYC Under Review")
+                        .message("Your KYC is currently under review")
+                        .build()
+        );
+
         return map(profile);
     }
 
     @Override
     public List<KycResponse> getPendingKyc() {
-        return repository
-                .findByKycStatus(KycStatus.PENDING)
+        return repository.findByKycStatus(KycStatus.PENDING)
                 .stream()
                 .map(this::map)
                 .toList();
     }
 
     @Override
-    public Long countByStatus(String pending) {
-        return repository.countBykycStatus(pending);
+    public Long countByStatus(String status) {
+        return repository.countByKycStatus(status);
     }
 
     @Override
     public List<Object[]> getStats() {
         return repository.getStats();
+    }
+
+    @Override
+    public KycEligibilityResponse checkEligibility(String userId) {
+
+        KycProfile profile = repository.findByUserId(userId)
+                .orElseThrow(() ->
+                        new KycNotFoundException("KYC not found for user: " + userId)
+                );
+
+        boolean eligible = profile.getKycStatus() == KycStatus.APPROVED;
+
+        return KycEligibilityResponse.builder()
+                .userId(profile.getUserId())
+                .eligible(eligible)
+                .status(profile.getKycStatus().name())
+                .message(eligible
+                        ? "Customer KYC is approved"
+                        : "Customer KYC is " + profile.getKycStatus()
+                          + ". Banking operation requires APPROVED KYC")
+                .build();
+    }
+
+    @Override
+    public List<KycResponse> getKycByStatus(String status) {
+        KycStatus kycStatus;
+        try {
+            kycStatus = KycStatus.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("Invalid KYC status. Allowed values: PENDING, UNDER_REVIEW, APPROVED, REJECTED"
+            );
+        }
+
+        return repository.findByKycStatus(kycStatus)
+                .stream()
+                .map(this::map)
+                .toList();
+    }
+
+
+    private KycProfile getProfile(String userId) {
+        return repository.findByUserId(userId).orElseThrow(() ->
+                new KycNotFoundException("KYC not found"));
+    }
+
+    private void validateMakerChecker(KycProfile profile, String checkerId) {
+        if (profile.getMakerId().equals(checkerId)) {
+            throw new IllegalStateException("Maker cannot review, approve, or reject their own KYC request");
+        }
+    }
+
+    private void validateAssignedChecker(KycProfile profile, String checkerId) {
+        if (profile.getCheckerId() == null || !profile.getCheckerId().equals(checkerId)) {
+            throw new IllegalStateException("Only the checker assigned during review can approve or reject this KYC");
+        }
     }
 
     private KycResponse map(KycProfile profile) {
@@ -226,16 +385,41 @@ public class KycServiceImpl implements KycService {
                 .userId(profile.getUserId())
                 .panNumber(profile.getPanNumber())
                 .aadhaarNumber(profile.getAadhaarNumber())
+                .panDocumentUrl(profile.getPanDocumentPath())
+                .aadhaarDocumentUrl(profile.getAadhaarDocumentPath())
                 .kycStatus(profile.getKycStatus())
                 .remarks(profile.getRemarks())
+                .makerId(profile.getMakerId())
+                .checkerId(profile.getCheckerId())
+                .checkerRemark(profile.getCheckerRemark())
+                .submittedAt(profile.getSubmittedAt())
+                .reviewedAt(profile.getReviewedAt())
+                .approvedAt(profile.getApprovedAt())
+                .rejectedAt(profile.getRejectedAt())
                 .build();
     }
-    private void validateKycAction(KycProfile profile) {
-        if (profile.getKycStatus()== KycStatus.APPROVED) {
-            throw new KycAlreadyExistsException("KYC already approved");
-        }
-        if (profile.getKycStatus() == KycStatus.REJECTED) {
-            throw new KycAlreadyExistsException("KYC already rejected");
-        }
+
+    private void publishAudit(
+            String userId,
+            String role,
+            String action,
+            KycProfile profile,
+            String description) {
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.AUDIT_LOG_TOPIC,
+                AuditEvent.builder()
+                        .userId(userId)
+                        .username(null)
+                        .role(role)
+                        .module("KYC")
+                        .action(action)
+                        .entityId(profile.getId())
+                        .entityType("KYC")
+                        .ipAddress("127.0.0.1")
+                        .description(description)
+                        .createdAt(LocalDateTime.now())
+                        .build()
+        );
     }
 }

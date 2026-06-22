@@ -1,8 +1,6 @@
 package com.bank.service.impl;
 
-import com.bank.client.AccountClient;
-import com.bank.client.NotificationClient;
-import com.bank.client.TransactionReferenceClient;
+import com.bank.client.*;
 import com.bank.common.events.AuditEvent;
 import com.bank.common.events.NotificationEvent;
 import com.bank.common.topics.KafkaTopics;
@@ -16,12 +14,12 @@ import com.bank.service.TransactionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.Collection;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -31,32 +29,38 @@ public class TransactionServiceImpl implements TransactionService {
     private final AccountClient accountClient;
     private final TransactionReferenceClient transactionReferenceClient;
     private final NotificationClient notificationClient;
-    private final KafkaEventPublisher  kafkaEventPublisher;
+    private final KafkaEventPublisher kafkaEventPublisher;
     private final TransactionLimitValidator limitValidator;
-
+    private final BeneficiaryClient beneficiaryClient;
+    private final KycClient kycClient;
+    private final RuleEngineClient ruleEngineClient;
 
     @Override
     public TransactionResponse deposit(AmountTransactionRequest request) {
         AmountRequest amountRequest = new AmountRequest();
         amountRequest.setAmount(request.getAmount());
+
         accountClient.credit(request.getAccountNumber(), amountRequest);
-        Transaction transaction =
-                saveTransaction(
-                        request.getCustomerId(),
-                        request.getAccountNumber(),
-                        null,
-                        request.getAmount(),
-                        TransactionType.DEPOSIT,
-                        request.getDescription());
+
+        Transaction transaction = saveTransaction(
+                request.getCustomerId(),
+                request.getAccountNumber(),
+                null,
+                request.getAmount(),
+                TransactionType.DEPOSIT,
+                request.getDescription()
+        );
+
         notificationClient.createNotification(
-                NotificationRequest
-                        .builder()
+                NotificationRequest.builder()
                         .userId(request.getCustomerId())
                         .title("Deposit Successful")
-                        .message("₹ "+ request.getAmount()+ " deposited successfully")
+                        .message("₹ " + request.getAmount() + " deposited successfully")
                         .build()
         );
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.AUDIT_LOG_TOPIC,
                 AuditEvent.builder()
                         .userId(transaction.getCustomerId())
                         .module("TRANSACTION")
@@ -68,33 +72,36 @@ public class TransactionServiceImpl implements TransactionService {
                         .createdAt(LocalDateTime.now())
                         .build()
         );
-        return map(transaction);
 
+        return map(transaction);
     }
 
     @Override
     public TransactionResponse withdraw(AmountTransactionRequest request) {
         AmountRequest amountRequest = new AmountRequest();
         amountRequest.setAmount(request.getAmount());
+
         accountClient.debit(request.getAccountNumber(), amountRequest);
 
-        Transaction transaction =
-                saveTransaction(
-                        request.getCustomerId(),
-                        request.getAccountNumber(),
-                        null,
-                        request.getAmount(),
-                        TransactionType.WITHDRAW,
-                        request.getDescription());
+        Transaction transaction = saveTransaction(
+                request.getCustomerId(),
+                request.getAccountNumber(),
+                null,
+                request.getAmount(),
+                TransactionType.WITHDRAW,
+                request.getDescription()
+        );
+
         notificationClient.createNotification(
-                NotificationRequest
-                        .builder()
+                NotificationRequest.builder()
                         .userId(request.getCustomerId())
                         .title("Withdrawal Successful")
-                        .message("₹ "+ request.getAmount()+ " withdrawn successfully")
+                        .message("₹ " + request.getAmount() + " withdrawn successfully")
                         .build()
         );
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.AUDIT_LOG_TOPIC,
                 AuditEvent.builder()
                         .userId(transaction.getCustomerId())
                         .module("TRANSACTION")
@@ -102,7 +109,7 @@ public class TransactionServiceImpl implements TransactionService {
                         .entityId(transaction.getId())
                         .entityType("TRANSACTION")
                         .ipAddress("127.0.0.1")
-                        .description("Withdrawal ₹" + transaction.getAmount()+ " withdrawn successfully")
+                        .description("Withdrawal ₹" + transaction.getAmount() + " withdrawn successfully")
                         .createdAt(LocalDateTime.now())
                         .build()
         );
@@ -112,63 +119,184 @@ public class TransactionServiceImpl implements TransactionService {
 
     @Override
     public TransactionResponse transfer(TransferRequest request) {
-        limitValidator.validateTransfer(
-                request.getFromAccount(),
-                request.getAmount());
-        if(request.getFromAccount().equals(request.getToAccount())) {
+
+        if (request.getFromAccount().equals(request.getToAccount())) {
             throw new RuntimeException("Cannot transfer to same account");
         }
+
+        BeneficiaryEligibilityResponse eligibility =
+                beneficiaryClient.checkEligibility(
+                        request.getCustomerId(),
+                        request.getToAccount()
+                );
+
+        if (!eligibility.isEligible()) {
+            throw new RuntimeException(
+                    "Transfer blocked: " + eligibility.getMessage()
+            );
+        }
+
+        KycEligibilityResponse kycEligibility =
+                kycClient.checkEligibility(request.getCustomerId());
+
+        if (!kycEligibility.isEligible()) {
+            throw new RuntimeException(
+                    "Transfer blocked: " + kycEligibility.getMessage()
+            );
+        }
+
+        limitValidator.validateTransfer(
+                request.getFromAccount(),
+                request.getAmount()
+        );
+
+        RuleEvaluationResponse ruleResult = evaluateTransferRule(request);
+
+        if ("REJECT".equalsIgnoreCase(ruleResult.getDecision())) {
+            Transaction rejectedTransaction = saveTransaction(
+                    request.getCustomerId(),
+                    request.getFromAccount(),
+                    request.getToAccount(),
+                    request.getAmount(),
+                    TransactionType.TRANSFER,
+                    request.getDescription()
+            );
+
+            rejectedTransaction.setTransactionStatus(TransactionStatus.REJECTED);
+            rejectedTransaction.setMakerId(request.getCustomerId());
+            rejectedTransaction.setRuleCode(ruleResult.getMatchedRuleCode());
+            rejectedTransaction.setRuleReason(ruleResult.getReason());
+
+            Transaction savedTransaction = repository.save(rejectedTransaction);
+
+            publishTransferAudit(
+                    savedTransaction,
+                    "TRANSFER_REJECTED_BY_RULE",
+                    "Transfer rejected by BRE rule: " + ruleResult.getReason()
+            );
+
+            notificationClient.createNotification(
+                    NotificationRequest.builder()
+                            .userId(request.getCustomerId())
+                            .title("Transfer Rejected")
+                            .message("Your transfer was rejected: "
+                                    + ruleResult.getReason())
+                            .build()
+            );
+
+            return map(savedTransaction);
+        }
+
+        if ("REQUIRE_CHECKER".equalsIgnoreCase(ruleResult.getDecision())) {
+            Transaction pendingTransaction = saveTransaction(
+                    request.getCustomerId(),
+                    request.getFromAccount(),
+                    request.getToAccount(),
+                    request.getAmount(),
+                    TransactionType.TRANSFER,
+                    request.getDescription()
+            );
+
+            pendingTransaction.setTransactionStatus(
+                    TransactionStatus.PENDING_APPROVAL
+            );
+            pendingTransaction.setMakerId(request.getCustomerId());
+            pendingTransaction.setRuleCode(ruleResult.getMatchedRuleCode());
+            pendingTransaction.setRuleReason(ruleResult.getReason());
+
+            Transaction savedTransaction = repository.save(pendingTransaction);
+
+            publishTransferAudit(
+                    savedTransaction,
+                    "TRANSFER_PENDING_APPROVAL",
+                    "Transfer requires checker approval. Rule: "
+                            + ruleResult.getMatchedRuleCode()
+            );
+
+            notificationClient.createNotification(
+                    NotificationRequest.builder()
+                            .userId(request.getCustomerId())
+                            .title("Transfer Pending Approval")
+                            .message("Your transfer of ₹" + request.getAmount()
+                                    + " is pending checker approval")
+                            .build()
+            );
+
+            kafkaEventPublisher.publish(
+                    KafkaTopics.NOTIFICATION_TOPIC,
+                    NotificationEvent.builder()
+                            .userId(request.getCustomerId())
+                            .title("Transfer Pending Approval")
+                            .message("₹" + request.getAmount()
+                                    + " transfer is waiting for checker approval")
+                            .type("TRANSACTION")
+                            .priority("HIGH")
+                            .build()
+            );
+
+            // No debit / credit before checker approval.
+            return map(savedTransaction);
+        }
+
         AmountRequest debitRequest = new AmountRequest();
         debitRequest.setAmount(request.getAmount());
         accountClient.debit(request.getFromAccount(), debitRequest);
+
         AmountRequest creditRequest = new AmountRequest();
         creditRequest.setAmount(request.getAmount());
         accountClient.credit(request.getToAccount(), creditRequest);
-        Transaction transaction =
-                saveTransaction(
-                        request.getCustomerId(),
-                        request.getFromAccount(),
-                        request.getToAccount(),
-                        request.getAmount(),
-                        TransactionType.TRANSFER,
-                        request.getDescription());
+
+        Transaction transaction = saveTransaction(
+                request.getCustomerId(),
+                request.getFromAccount(),
+                request.getToAccount(),
+                request.getAmount(),
+                TransactionType.TRANSFER,
+                request.getDescription()
+        );
+
+        transaction.setTransactionStatus(TransactionStatus.SUCCESS);
+        transaction.setMakerId(request.getCustomerId());
+        transaction.setRuleCode(ruleResult.getMatchedRuleCode());
+        transaction.setRuleReason(ruleResult.getReason());
+
+        Transaction savedTransaction = repository.save(transaction);
 
         notificationClient.createNotification(
-                NotificationRequest
-                        .builder()
+                NotificationRequest.builder()
                         .userId(request.getCustomerId())
                         .title("Transfer Successful")
-                        .message("₹ "+ request.getAmount()+ " transferred successfully")
+                        .message("₹ " + request.getAmount()
+                                + " transferred successfully")
                         .build()
         );
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
-                AuditEvent.builder()
-                        .userId(transaction.getCustomerId())
-                        .module("TRANSACTION")
-                        .action("TRANSFER_SUCCESS")
-                        .entityId(transaction.getId())
-                        .entityType("TRANSACTION")
-                        .ipAddress("127.0.0.1")
-                        .description("Transfer ₹" + transaction.getAmount()+ " transferred successfully")
-                        .createdAt(LocalDateTime.now())
-                        .build()
+
+        publishTransferAudit(
+                savedTransaction,
+                "TRANSFER_SUCCESS",
+                "Transfer ₹" + savedTransaction.getAmount()
+                        + " transferred successfully to approved beneficiary "
+                        + eligibility.getBeneficiaryId()
         );
-        kafkaEventPublisher.publish(KafkaTopics.NOTIFICATION_TOPIC,
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.NOTIFICATION_TOPIC,
                 NotificationEvent.builder()
-                        .userId(transaction.getCustomerId())
+                        .userId(savedTransaction.getCustomerId())
                         .title("Transaction Successful")
-                        .message("₹" + transaction.getAmount() + " transferred successfully")
+                        .message("₹" + savedTransaction.getAmount()
+                                + " transferred successfully")
                         .type("TRANSACTION")
                         .priority("MEDIUM")
                         .build()
         );
-        return map(transaction);
+
+        return map(savedTransaction);
     }
 
     @Override
     public List<TransactionResponse> getCustomerTransactions(String customerId) {
-        return repository
-                .findByCustomerIdOrderByTransactionDateDesc(customerId)
+        return repository.findByCustomerIdOrderByTransactionDateDesc(customerId)
                 .stream()
                 .map(this::map)
                 .toList();
@@ -176,8 +304,7 @@ public class TransactionServiceImpl implements TransactionService {
 
     @Override
     public List<TransactionResponse> getAccountTransactions(String accountNumber) {
-        return repository
-                .findBySourceAccountOrderByTransactionDateDesc(accountNumber)
+        return repository.findBySourceAccountOrderByTransactionDateDesc(accountNumber)
                 .stream()
                 .map(this::map)
                 .toList();
@@ -198,8 +325,7 @@ public class TransactionServiceImpl implements TransactionService {
 
     @Override
     public List<TransactionResponse> getAllTransactions() {
-        return repository
-                .findAllByOrderByCreatedAtDesc()
+        return repository.findAllByOrderByCreatedAtDesc()
                 .stream()
                 .map(this::map)
                 .toList();
@@ -208,12 +334,11 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     public Long countTodayTransactions() {
         LocalDate today = LocalDate.now();
-        LocalDateTime start = today.atStartOfDay();
-        LocalDateTime end = today.plusDays(1).atStartOfDay();
-        return repository
-                .countTodayTransactions(
-                        start,
-                        end);
+
+        return repository.countTodayTransactions(
+                today.atStartOfDay(),
+                today.plusDays(1).atStartOfDay()
+        );
     }
 
     @Override
@@ -222,68 +347,229 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
-    public List<Transaction> findAllByOrderByTransactionDateDesc(PageRequest of) {
-        return repository.findAllByOrderByTransactionDateDesc(PageRequest.of(of.getPageNumber(),of.getPageSize()));
+    public List<Transaction> findAllByOrderByTransactionDateDesc(PageRequest pageRequest) {
+        return repository.findAllByOrderByTransactionDateDesc(
+                PageRequest.of(
+                        pageRequest.getPageNumber(),
+                        pageRequest.getPageSize()
+                )
+        );
     }
 
     @Override
-    public List<StatementTransactionResponse> findBySourceAccountAndTransactionDateBetweenOrderByTransactionDateDesc(String accountNumber, LocalDate fromDate, LocalDate toDate) {
-        LocalDateTime start =
-                fromDate.atStartOfDay();
+    public List<StatementTransactionResponse>
+    findBySourceAccountAndTransactionDateBetweenOrderByTransactionDateDesc(
+            String accountNumber,
+            LocalDate fromDate,
+            LocalDate toDate) {
 
-        LocalDateTime end =
-                toDate.plusDays(1)
-                        .atStartOfDay();
+        return repository
+                .findBySourceAccountAndTransactionDateBetweenOrderByTransactionDateDesc(
+                        accountNumber,
+                        fromDate.atStartOfDay(),
+                        toDate.plusDays(1).atStartOfDay()
+                )
+                .stream()
+                .map(this::mapTransaction)
+                .toList();
+    }
 
-        var transactions =
-                repository
-                        .findBySourceAccountAndTransactionDateBetweenOrderByTransactionDateDesc(
-                                accountNumber,
-                                start,
-                                end)
-                        .stream()
-                        .map(this::mapTransaction)
-                        .toList();
+    @Override
+    public List<TransactionResponse> getPendingApprovalTransactions() {
+        return repository
+                .findByTransactionStatusOrderByCreatedAtDesc(
+                        TransactionStatus.PENDING_APPROVAL
+                )
+                .stream()
+                .map(this::map)
+                .toList();
+    }
 
-        return transactions;
+    @Override
+    @Transactional
+    public TransactionResponse approvePendingTransaction(
+            String transactionId,
+            CheckerActionRequest request) {
+
+        Transaction transaction = getPendingTransaction(transactionId);
+
+        validateCheckerIsNotMaker(transaction, request.getCheckerId());
+
+        /*
+         * Money movement occurs only after the checker has approved.
+         * If debit or credit throws an exception, the database transaction
+         * rolls back and status remains PENDING_APPROVAL.
+         */
+        AmountRequest debitRequest = new AmountRequest();
+        debitRequest.setAmount(transaction.getAmount());
+        accountClient.debit(transaction.getSourceAccount(), debitRequest);
+
+        AmountRequest creditRequest = new AmountRequest();
+        creditRequest.setAmount(transaction.getAmount());
+        accountClient.credit(transaction.getDestinationAccount(), creditRequest);
+
+        transaction.setTransactionStatus(TransactionStatus.SUCCESS);
+        transaction.setCheckerId(request.getCheckerId());
+        transaction.setCheckerRemarks(request.getRemarks());
+        transaction.setCheckerActionAt(LocalDateTime.now());
+
+        Transaction approvedTransaction = repository.save(transaction);
+
+        publishTransferAudit(
+                approvedTransaction,
+                "TRANSFER_APPROVED_BY_CHECKER",
+                "Transfer approved by checker: " + request.getCheckerId()
+        );
+
+        notificationClient.createNotification(
+                NotificationRequest.builder()
+                        .userId(approvedTransaction.getCustomerId())
+                        .title("Transfer Approved")
+                        .message("Your transfer of ₹"
+                                + approvedTransaction.getAmount()
+                                + " has been approved and completed")
+                        .build()
+        );
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.NOTIFICATION_TOPIC,
+                NotificationEvent.builder()
+                        .userId(approvedTransaction.getCustomerId())
+                        .title("Transfer Approved")
+                        .message("₹" + approvedTransaction.getAmount()
+                                + " transfer has been approved")
+                        .type("TRANSACTION")
+                        .priority("HIGH")
+                        .build()
+        );
+
+        return map(approvedTransaction);
+    }
+
+    @Override
+    @Transactional
+    public TransactionResponse rejectPendingTransaction(
+            String transactionId,
+            CheckerActionRequest request) {
+
+        Transaction transaction = getPendingTransaction(transactionId);
+
+        validateCheckerIsNotMaker(transaction, request.getCheckerId());
+
+        transaction.setTransactionStatus(TransactionStatus.REJECTED);
+        transaction.setCheckerId(request.getCheckerId());
+        transaction.setCheckerRemarks(request.getRemarks());
+        transaction.setCheckerActionAt(LocalDateTime.now());
+
+        Transaction rejectedTransaction = repository.save(transaction);
+
+        publishTransferAudit(
+                rejectedTransaction,
+                "TRANSFER_REJECTED_BY_CHECKER",
+                "Transfer rejected by checker: " + request.getCheckerId()
+        );
+
+        notificationClient.createNotification(
+                NotificationRequest.builder()
+                        .userId(rejectedTransaction.getCustomerId())
+                        .title("Transfer Rejected")
+                        .message("Your transfer of ₹"
+                                + rejectedTransaction.getAmount()
+                                + " was rejected by checker"
+                                + (request.getRemarks() == null
+                                || request.getRemarks().isBlank()
+                                ? ""
+                                : ". Remarks: " + request.getRemarks()))
+                        .build()
+        );
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.NOTIFICATION_TOPIC,
+                NotificationEvent.builder()
+                        .userId(rejectedTransaction.getCustomerId())
+                        .title("Transfer Rejected")
+                        .message("₹" + rejectedTransaction.getAmount()
+                                + " transfer was rejected")
+                        .type("TRANSACTION")
+                        .priority("HIGH")
+                        .build()
+        );
+
+        return map(rejectedTransaction);
+    }
+
+    private Transaction getPendingTransaction(String transactionId) {
+        return repository.findByIdAndTransactionStatus(
+                        transactionId,
+                        TransactionStatus.PENDING_APPROVAL
+                )
+                .orElseThrow(() -> new RuntimeException(
+                        "Pending transaction not found or already processed: "
+                                + transactionId
+                ));
+    }
+
+    private void validateCheckerIsNotMaker(
+            Transaction transaction,
+            String checkerId) {
+
+        if (transaction.getMakerId() != null
+                && transaction.getMakerId().equals(checkerId)) {
+            throw new RuntimeException(
+                    "Maker cannot approve or reject their own transaction"
+            );
+        }
+    }
+
+    private RuleEvaluationResponse evaluateTransferRule(TransferRequest request) {
+        Map<String, Object> payload = new HashMap<>();
+
+        payload.put("amount", request.getAmount());
+
+        // Replace these temporary values later with real customer/beneficiary data.
+        payload.put("customerType", "REGULAR");
+        payload.put("bankType", "EXTERNAL");
+
+        return ruleEngineClient.evaluate(
+                RuleEvaluationRequest.builder()
+                        .ruleType("TRANSFER")
+                        .payload(payload)
+                        .build()
+        );
     }
 
     private Transaction saveTransaction(
             String customerId,
             String sourceAccount,
             String destinationAccount,
-            java.math.BigDecimal amount,
+            BigDecimal amount,
             TransactionType type,
             String description) {
 
-        String referenceNumber =
-                transactionReferenceClient
-                        .generateTransactionReference()
-                        .getReferenceNumber();
+        String referenceNumber = transactionReferenceClient
+                .generateTransactionReference()
+                .getReferenceNumber();
 
-        Transaction transaction =
-                Transaction.builder()
-                        .id(UUID.randomUUID().toString())
-                        .transactionReference(referenceNumber)
-                        .customerId(customerId)
-                        .sourceAccount(sourceAccount)
-                        .destinationAccount(destinationAccount)
-                        .transactionType(type)
-                        .transactionStatus(TransactionStatus.SUCCESS)
-                        .amount(amount)
-                        .description(description)
-                        .transactionDate(LocalDateTime.now())
-                        .createdAt(LocalDateTime.now())
-                        .build();
+        Transaction transaction = Transaction.builder()
+                .id(UUID.randomUUID().toString())
+                .transactionReference(referenceNumber)
+                .customerId(customerId)
+                .sourceAccount(sourceAccount)
+                .destinationAccount(destinationAccount)
+                .transactionType(type)
+                .transactionStatus(TransactionStatus.SUCCESS)
+                .amount(amount)
+                .description(description)
+                .transactionDate(LocalDateTime.now())
+                .createdAt(LocalDateTime.now())
+                .build();
 
-        return repository.save(
-                transaction);
+        return repository.save(transaction);
     }
 
-    private TransactionResponse map(
-            Transaction transaction) {
-        return TransactionResponse
-                .builder()
+    private TransactionResponse map(Transaction transaction) {
+        return TransactionResponse.builder()
+                .id(transaction.getId())
                 .transactionReference(transaction.getTransactionReference())
                 .sourceAccount(transaction.getSourceAccount())
                 .destinationAccount(transaction.getDestinationAccount())
@@ -292,30 +578,45 @@ public class TransactionServiceImpl implements TransactionService {
                 .amount(transaction.getAmount())
                 .description(transaction.getDescription())
                 .transactionDate(transaction.getTransactionDate())
+                .makerId(transaction.getMakerId())
+                .checkerId(transaction.getCheckerId())
+                .checkerRemarks(transaction.getCheckerRemarks())
+                .checkerActionAt(transaction.getCheckerActionAt())
+                .ruleCode(transaction.getRuleCode())
+                .ruleReason(transaction.getRuleReason())
                 .build();
     }
 
-    private StatementTransactionResponse mapTransaction(
-            Transaction txn) {
-
-        return StatementTransactionResponse
-                .builder()
-                .transactionReference(
-                        txn.getTransactionReference())
-                .sourceAccount(
-                        txn.getSourceAccount())
-                .destinationAccount(
-                        txn.getDestinationAccount())
-                .transactionType(
-                        txn.getTransactionType().name())
-                .transactionStatus(
-                        txn.getTransactionStatus().name())
-                .amount(
-                        txn.getAmount())
-                .description(
-                        txn.getDescription())
-                .transactionDate(
-                        txn.getTransactionDate())
+    private StatementTransactionResponse mapTransaction(Transaction transaction) {
+        return StatementTransactionResponse.builder()
+                .transactionReference(transaction.getTransactionReference())
+                .sourceAccount(transaction.getSourceAccount())
+                .destinationAccount(transaction.getDestinationAccount())
+                .transactionType(transaction.getTransactionType().name())
+                .transactionStatus(transaction.getTransactionStatus().name())
+                .amount(transaction.getAmount())
+                .description(transaction.getDescription())
+                .transactionDate(transaction.getTransactionDate())
                 .build();
+    }
+
+    private void publishTransferAudit(
+            Transaction transaction,
+            String action,
+            String description) {
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.AUDIT_LOG_TOPIC,
+                AuditEvent.builder()
+                        .userId(transaction.getCustomerId())
+                        .module("TRANSACTION")
+                        .action(action)
+                        .entityId(transaction.getId())
+                        .entityType("TRANSACTION")
+                        .ipAddress("127.0.0.1")
+                        .description(description)
+                        .createdAt(LocalDateTime.now())
+                        .build()
+        );
     }
 }

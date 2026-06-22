@@ -1,5 +1,6 @@
 package com.bank.controller;
 
+import com.bank.dtos.BeneficiaryEligibilityResponse;
 import com.bank.dtos.BeneficiaryResponse;
 import com.bank.dtos.CreateBeneficiaryRequest;
 import com.bank.service.BeneficiaryService;
@@ -25,14 +26,9 @@ public class BeneficiaryController {
         return service.getCustomerBeneficiaries(customerId);
     }
 
-    @PutMapping("/{beneficiaryId}/approve")
-    public BeneficiaryResponse approveBeneficiary(@PathVariable String beneficiaryId) {
-        return service.approveBeneficiary(beneficiaryId);
-    }
-
-    @PutMapping("/{beneficiaryId}/reject")
-    public BeneficiaryResponse rejectBeneficiary(@PathVariable String beneficiaryId) {
-        return service.rejectBeneficiary(beneficiaryId);
+    @GetMapping("/{beneficiaryId}/eligibility")
+    public BeneficiaryEligibilityResponse checkEligibility(@PathVariable String beneficiaryId,@RequestParam String customerId) {
+        return service.checkEligibility(beneficiaryId, customerId);
     }
 
     @DeleteMapping("/{beneficiaryId}")
@@ -44,4 +40,6 @@ public class BeneficiaryController {
     public Long getCount(@PathVariable String customerId) {
         return service.getBeneficiaryCount(customerId);
     }
+
+
 }

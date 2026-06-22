@@ -8,3 +8,4 @@ CREATE DATABASE nominee_db;
 CREATE DATABASE transaction_db;
 CREATE DATABASE notification_db;
 CREATE DATABASE audit_log_db;
+CREATE DATABASE rule_engine_db;

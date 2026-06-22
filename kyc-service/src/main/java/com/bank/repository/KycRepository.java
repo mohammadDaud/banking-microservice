@@ -13,13 +13,17 @@ public interface KycRepository extends JpaRepository<KycProfile,String> {
     boolean existsByUserId(String userId);
     List<KycProfile> findByKycStatus(KycStatus status);
 
-    long countBykycStatus(String status);
+    @Query("""
+            SELECT k.kycStatus, COUNT(k)
+            FROM KycProfile k
+            GROUP BY k.kycStatus
+            """)
+    List<Object[]> getStats();
 
     @Query("""
-        SELECT k.kycStatus,
-               COUNT(k)
-        FROM KycProfile k
-        GROUP BY k.kycStatus
-    """)
-    List<Object[]> getStats();
+            SELECT COUNT(k)
+            FROM KycProfile k
+            WHERE CAST(k.kycStatus AS string) = :status
+            """)
+    Long countByKycStatus(String status);
 }

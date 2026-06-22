@@ -6,6 +6,11 @@ import lombok.Data;
 public class CreateBeneficiaryRequest {
 
     private String customerId;
+    /*
+     * Temporary approach.
+     * Later get makerId from JWT token / SecurityContext.
+     */
+    private String makerId;
 
     private String beneficiaryName;
 

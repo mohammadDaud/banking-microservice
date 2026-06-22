@@ -35,6 +35,22 @@ public class Beneficiary {
     @Enumerated(EnumType.STRING)
     private BeneficiaryStatus status;
 
+    // User/customer/employee who submitted request
+    @Column(nullable = false)
+    private String makerId;
+
+    // Admin/checker who approved or rejected request
+    private String checkerId;
+
+    @Column(length = 500)
+    private String checkerRemark;
+
+    private LocalDateTime submittedAt;
+
+    private LocalDateTime approvedAt;
+
+    private LocalDateTime rejectedAt;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

@@ -1,6 +1,7 @@
 package com.bank.controller;
 
 import com.bank.dtos.CreateKycRequest;
+import com.bank.dtos.KycEligibilityResponse;
 import com.bank.dtos.KycResponse;
 import com.bank.service.KycService;
 import lombok.RequiredArgsConstructor;
@@ -24,23 +25,29 @@ public class KycController {
             @RequestPart MultipartFile aadhaarDocument) {
         return service.createKyc(userId,panNumber,aadhaarNumber,panDocument,aadhaarDocument);
     }
+    @PutMapping(value = "/{userId}/resubmit",consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public KycResponse resubmitKyc(
+            @PathVariable String userId,
+            @RequestParam String panNumber,
+            @RequestParam String aadhaarNumber,
+            @RequestPart MultipartFile panDocument,
+            @RequestPart MultipartFile aadhaarDocument) {
+
+        return service.resubmitKyc(
+                userId,
+                panNumber,
+                aadhaarNumber,
+                panDocument,
+                aadhaarDocument
+        );
+    }
     @GetMapping("/{userId}")
     public KycResponse getKyc(@PathVariable String userId) {
         return service.getKyc(userId);
     }
 
-    @PutMapping("/{userId}/approve")
-    public KycResponse approve(@PathVariable String userId) {
-        return service.approveKyc(userId);
-    }
-
-    @PutMapping("/{userId}/reject")
-    public KycResponse reject(@PathVariable String userId,@RequestParam String remarks) {
-        return service.rejectKyc(userId,remarks);
-    }
-
-    @PutMapping("/{userId}/review")
-    public KycResponse review(@PathVariable String userId) {
-        return service.reviewKyc(userId);
+    @GetMapping("/{userId}/eligibility")
+    public KycEligibilityResponse checkEligibility(@PathVariable String userId) {
+        return service.checkEligibility(userId);
     }
 }

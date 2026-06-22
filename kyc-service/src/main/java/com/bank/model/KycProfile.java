@@ -35,7 +35,23 @@ public class KycProfile {
 
     private String remarks;
 
-    private LocalDateTime createdAt;
+    // ADD BELOW
+    @Column(nullable = false)
+    private String makerId;
 
+    private String checkerId;
+
+    @Column(length = 500)
+    private String checkerRemark;
+
+    private LocalDateTime submittedAt;
+
+    private LocalDateTime reviewedAt;
+
+    private LocalDateTime approvedAt;
+
+    private LocalDateTime rejectedAt;
+
+    private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -1,6 +1,7 @@
 package com.bank.accs.service;
 
 import com.bank.accs.client.AccountNumberClient;
+import com.bank.accs.client.KycClient;
 import com.bank.accs.client.NotificationClient;
 import com.bank.accs.client.TransactionClient;
 import com.bank.accs.dtos.*;
@@ -40,8 +41,16 @@ public class AccountService {
 
     private final KafkaEventPublisher kafkaEventPublisher;
 
+    private final KycClient kycClient;
+
     @Transactional
     public CreateAccountResponse createAccount(CreateAccountRequest request) {
+
+        // Kyc must be APPROVED of this customer.
+        KycEligibilityResponse kycEligibility = kycClient.checkEligibility(request.getCustomerId());
+        if (!kycEligibility.isEligible()) {
+            throw new RuntimeException("Account Creation blocked: " + kycEligibility.getMessage());
+        }
 
         String accountNumber =generateAccountNumber();
 

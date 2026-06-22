@@ -3,11 +3,15 @@ package com.bank.dtos;
 import lombok.Builder;
 import lombok.Data;
 
+import java.time.LocalDateTime;
+
 @Data
 @Builder
 public class BeneficiaryResponse {
 
     private String id;
+
+    private String customerId;
 
     private String beneficiaryName;
 
@@ -20,4 +24,20 @@ public class BeneficiaryResponse {
     private String nickname;
 
     private String status;
+
+    private String makerId;
+
+    private String checkerId;
+
+    private String checkerRemark;
+
+    private LocalDateTime submittedAt;
+
+    private LocalDateTime approvedAt;
+
+    private LocalDateTime rejectedAt;
+
+    private LocalDateTime createdAt;
+
+    private LocalDateTime updatedAt;
 }
