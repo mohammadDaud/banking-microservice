@@ -17,5 +17,6 @@ public class NotificationResponse {
 
     private Boolean readFlag;
 
+    // @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
 }

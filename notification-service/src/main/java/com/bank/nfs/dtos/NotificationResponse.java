@@ -2,6 +2,7 @@ package com.bank.nfs.dtos;
 
 import com.bank.nfs.enums.NotificationPriority;
 import com.bank.nfs.enums.NotificationType;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Builder;
 import lombok.Data;
 
@@ -23,5 +24,6 @@ public class NotificationResponse {
 
     private NotificationPriority priority;
 
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
 }

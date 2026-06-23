@@ -1,4 +1,4 @@
-package com.bank.nfs.config;
+package com.bank.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;

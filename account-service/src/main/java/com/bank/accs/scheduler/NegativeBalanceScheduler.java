@@ -17,7 +17,7 @@ public class NegativeBalanceScheduler {
 
     private final AccountRepository repository;
 
-    @Scheduled(cron = "0 0 */6 * * *")
+    //@Scheduled(cron = "0 0 */6 * * *")
     public void monitorNegativeBalance() {
         List<Account> accounts = repository.findByAvailableBalanceLessThan(BigDecimal.ZERO);
         log.info("Negative balance accounts {}",accounts.size());

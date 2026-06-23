@@ -4,7 +4,6 @@ import com.bank.client.NotificationClient;
 import com.bank.common.events.AuditEvent;
 import com.bank.common.events.NotificationEvent;
 import com.bank.common.topics.KafkaTopics;
-import com.bank.dtos.KycApprovalRequest;
 import com.bank.dtos.KycEligibilityResponse;
 import com.bank.dtos.KycResponse;
 import com.bank.dtos.NotificationRequest;
@@ -69,7 +68,13 @@ public class KycServiceImpl implements KycService {
                 .build();
 
         KycProfile savedProfile = repository.save(profile);
-
+        System.out.println(
+                "KYC CREATE Service : userId=" + userId
+                        + ", pan=" + panNumber
+                        + ", aadhaar=" + aadhaarNumber
+                        + ", panFile=" + panDocument.getOriginalFilename()
+                        + ", aadhaarFile=" + aadhaarDocument.getOriginalFilename()
+        );
         notificationClient.createNotification(
                 NotificationRequest.builder()
                         .userId(savedProfile.getUserId())

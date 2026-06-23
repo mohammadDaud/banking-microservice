@@ -17,7 +17,7 @@ public class InactiveAccountScheduler {
 
     private final AccountRepository repository;
 
-    @Scheduled(cron = "0 0 2 * * SUN")
+    //@Scheduled(cron = "0 0 2 * * SUN")
     public void monitorInactiveAccounts() {
         LocalDateTime cutoff =LocalDateTime.now().minusMonths(6);
         List<Account> accounts = repository.findByUpdatedAtBefore(cutoff);

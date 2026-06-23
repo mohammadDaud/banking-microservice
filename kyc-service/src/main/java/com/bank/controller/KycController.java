@@ -23,7 +23,13 @@ public class KycController {
             @RequestParam String aadhaarNumber,
             @RequestPart MultipartFile panDocument,
             @RequestPart MultipartFile aadhaarDocument) {
-
+        System.out.println(
+                "KYC CREATE: userId=" + loggedInUserId
+                        + ", pan=" + panNumber
+                        + ", aadhaar=" + aadhaarNumber
+                        + ", panFile=" + panDocument.getOriginalFilename()
+                        + ", aadhaarFile=" + aadhaarDocument.getOriginalFilename()
+        );
         return service.createKyc(
                 loggedInUserId,
                 panNumber,
