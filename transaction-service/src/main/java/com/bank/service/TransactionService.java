@@ -28,9 +28,16 @@ public interface TransactionService {
     List<StatementTransactionResponse>
     findBySourceAccountAndTransactionDateBetweenOrderByTransactionDateDesc(String accountNumber,LocalDate fromDate,LocalDate toDate);
 
-    TransactionResponse approvePendingTransaction(String transactionId,CheckerActionRequest request);
+    TransactionResponse approvePendingTransaction(
+            String transactionId,
+            String checkerId,
+            String remarks
+    );
 
-    TransactionResponse rejectPendingTransaction(String transactionId,CheckerActionRequest request);
-
+    TransactionResponse rejectPendingTransaction(
+            String transactionId,
+            String checkerId,
+            String remarks
+    );
     List<TransactionResponse> getPendingApprovalTransactions();
 }

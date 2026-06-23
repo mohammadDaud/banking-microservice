@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Arrays;
 import java.util.List;
 
 @RestController
@@ -70,12 +71,52 @@ public class AdminTransactionController {
     }
 
     @PutMapping("/{transactionId}/approve")
-    public TransactionResponse approveTransaction(@PathVariable String transactionId, @RequestBody CheckerActionRequest request) {
-        return service.approvePendingTransaction(transactionId,request);
+    public TransactionResponse approveTransaction(
+            @PathVariable String transactionId,
+            @RequestHeader("X-User-Id") String checkerId,
+            @RequestHeader("X-Roles") String roles,
+            @RequestBody CheckerActionRequest request) {
+        validateCheckerRole(roles);
+        return service.approvePendingTransaction(
+                transactionId,
+                checkerId,
+                request.getRemarks()
+        );
     }
 
     @PutMapping("/{transactionId}/reject")
-    public TransactionResponse rejectTransaction(@PathVariable String transactionId, @RequestBody CheckerActionRequest request) {
-        return service.rejectPendingTransaction(transactionId,request);
+    public TransactionResponse rejectTransaction(@PathVariable String transactionId,
+                                                 @RequestHeader("X-User-Id") String checkerId,
+                                                 @RequestHeader("X-Roles") String roles,
+                                                 @RequestBody CheckerActionRequest request) {
+        validateCheckerRole(roles);
+
+        if (request.getRemarks() == null || request.getRemarks().isBlank()) {
+            throw new RuntimeException("Remarks are required when rejecting a transaction");
+        }
+        return service.rejectPendingTransaction(
+                transactionId,
+                checkerId,
+                request.getRemarks()
+        );
+    }
+
+    private void validateCheckerRole(String roles) {
+        if (roles == null) {
+            throw new RuntimeException("User roles are missing");
+        }
+
+        boolean allowed = Arrays.stream(roles.split(","))
+                .map(String::trim)
+                .anyMatch(role ->
+                        "ROLE_ADMIN".equalsIgnoreCase(role)
+                                || "ROLE_CHECKER".equalsIgnoreCase(role)
+                );
+
+        if (!allowed) {
+            throw new RuntimeException(
+                    "Only ADMIN or CHECKER can approve or reject transactions"
+            );
+        }
     }
 }

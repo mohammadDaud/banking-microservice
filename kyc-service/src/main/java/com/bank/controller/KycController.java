@@ -16,38 +16,58 @@ public class KycController {
 
     private final KycService service;
 
-    @PostMapping(consumes =MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public KycResponse createKyc(
-            @RequestParam String userId,
-            @RequestParam String panNumber,
-            @RequestParam String aadhaarNumber,
-            @RequestPart MultipartFile panDocument,
-            @RequestPart MultipartFile aadhaarDocument) {
-        return service.createKyc(userId,panNumber,aadhaarNumber,panDocument,aadhaarDocument);
-    }
-    @PutMapping(value = "/{userId}/resubmit",consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public KycResponse resubmitKyc(
-            @PathVariable String userId,
+            @RequestHeader("X-User-Id") String loggedInUserId,
             @RequestParam String panNumber,
             @RequestParam String aadhaarNumber,
             @RequestPart MultipartFile panDocument,
             @RequestPart MultipartFile aadhaarDocument) {
 
-        return service.resubmitKyc(
-                userId,
+        return service.createKyc(
+                loggedInUserId,
                 panNumber,
                 aadhaarNumber,
                 panDocument,
                 aadhaarDocument
         );
     }
-    @GetMapping("/{userId}")
-    public KycResponse getKyc(@PathVariable String userId) {
-        return service.getKyc(userId);
+
+    @PutMapping(
+            value = "/resubmit",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public KycResponse resubmitKyc(
+            @RequestHeader("X-User-Id") String loggedInUserId,
+            @RequestParam String panNumber,
+            @RequestParam String aadhaarNumber,
+            @RequestPart MultipartFile panDocument,
+            @RequestPart MultipartFile aadhaarDocument) {
+
+        return service.resubmitKyc(
+                loggedInUserId,
+                panNumber,
+                aadhaarNumber,
+                panDocument,
+                aadhaarDocument
+        );
     }
 
+    @GetMapping("/me")
+    public KycResponse getMyKyc(
+            @RequestHeader("X-User-Id") String loggedInUserId) {
+
+        return service.getKyc(loggedInUserId);
+    }
+
+    /*
+     * Internal endpoint used by account-service / beneficiary-service.
+     * Later restrict this endpoint to your Docker internal network.
+     */
     @GetMapping("/{userId}/eligibility")
-    public KycEligibilityResponse checkEligibility(@PathVariable String userId) {
+    public KycEligibilityResponse checkEligibility(
+            @PathVariable String userId) {
+
         return service.checkEligibility(userId);
     }
 }

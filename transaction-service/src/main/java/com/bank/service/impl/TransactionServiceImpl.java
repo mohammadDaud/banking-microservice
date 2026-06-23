@@ -389,11 +389,12 @@ public class TransactionServiceImpl implements TransactionService {
     @Transactional
     public TransactionResponse approvePendingTransaction(
             String transactionId,
-            CheckerActionRequest request) {
+            String checkerId,
+            String remarks) {
 
         Transaction transaction = getPendingTransaction(transactionId);
 
-        validateCheckerIsNotMaker(transaction, request.getCheckerId());
+        validateCheckerIsNotMaker(transaction, checkerId);
 
         /*
          * Money movement occurs only after the checker has approved.
@@ -409,8 +410,8 @@ public class TransactionServiceImpl implements TransactionService {
         accountClient.credit(transaction.getDestinationAccount(), creditRequest);
 
         transaction.setTransactionStatus(TransactionStatus.SUCCESS);
-        transaction.setCheckerId(request.getCheckerId());
-        transaction.setCheckerRemarks(request.getRemarks());
+        transaction.setCheckerId(checkerId);
+        transaction.setCheckerRemarks(remarks);
         transaction.setCheckerActionAt(LocalDateTime.now());
 
         Transaction approvedTransaction = repository.save(transaction);
@@ -418,7 +419,7 @@ public class TransactionServiceImpl implements TransactionService {
         publishTransferAudit(
                 approvedTransaction,
                 "TRANSFER_APPROVED_BY_CHECKER",
-                "Transfer approved by checker: " + request.getCheckerId()
+                "Transfer approved by checker: " + checkerId
         );
 
         notificationClient.createNotification(
@@ -450,15 +451,16 @@ public class TransactionServiceImpl implements TransactionService {
     @Transactional
     public TransactionResponse rejectPendingTransaction(
             String transactionId,
-            CheckerActionRequest request) {
+            String checkerId,
+            String remarks) {
 
         Transaction transaction = getPendingTransaction(transactionId);
 
-        validateCheckerIsNotMaker(transaction, request.getCheckerId());
+        validateCheckerIsNotMaker(transaction, checkerId);
 
         transaction.setTransactionStatus(TransactionStatus.REJECTED);
-        transaction.setCheckerId(request.getCheckerId());
-        transaction.setCheckerRemarks(request.getRemarks());
+        transaction.setCheckerId(checkerId);
+        transaction.setCheckerRemarks(remarks);
         transaction.setCheckerActionAt(LocalDateTime.now());
 
         Transaction rejectedTransaction = repository.save(transaction);
@@ -466,7 +468,7 @@ public class TransactionServiceImpl implements TransactionService {
         publishTransferAudit(
                 rejectedTransaction,
                 "TRANSFER_REJECTED_BY_CHECKER",
-                "Transfer rejected by checker: " + request.getCheckerId()
+                "Transfer rejected by checker: " + checkerId
         );
 
         notificationClient.createNotification(
@@ -476,10 +478,10 @@ public class TransactionServiceImpl implements TransactionService {
                         .message("Your transfer of ₹"
                                 + rejectedTransaction.getAmount()
                                 + " was rejected by checker"
-                                + (request.getRemarks() == null
-                                || request.getRemarks().isBlank()
+                                + (remarks == null
+                                || remarks.isBlank()
                                 ? ""
-                                : ". Remarks: " + request.getRemarks()))
+                                : ". Remarks: " + remarks))
                         .build()
         );
 

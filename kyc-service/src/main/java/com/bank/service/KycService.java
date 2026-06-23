@@ -11,25 +11,52 @@ import java.util.List;
 
 public interface KycService {
 
-    KycResponse createKyc(String userId,String panNumber,String aadhaarNumber,MultipartFile panDocument,MultipartFile aadhaarDocument);
 
-    KycResponse resubmitKyc(String userId,String panNumber,String aadhaarNumber,MultipartFile panDocument,MultipartFile aadhaarDocument);
+    KycResponse createKyc(
+            String userId,
+            String panNumber,
+            String aadhaarNumber,
+            MultipartFile panDocument,
+            MultipartFile aadhaarDocument
+    );
+
+    KycResponse resubmitKyc(
+            String userId,
+            String panNumber,
+            String aadhaarNumber,
+            MultipartFile panDocument,
+            MultipartFile aadhaarDocument
+    );
 
     KycResponse getKyc(String userId);
 
-    KycResponse reviewKyc(String userId, KycApprovalRequest request);
+    KycResponse reviewKyc(
+            String userId,
+            String checkerId,
+            String remark
+    );
 
-    KycResponse approveKyc(String userId, KycApprovalRequest request);
+    KycResponse approveKyc(
+            String userId,
+            String checkerId,
+            String remark
+    );
 
-    KycResponse rejectKyc(String userId, KycApprovalRequest request);
+    KycResponse rejectKyc(
+            String userId,
+            String checkerId,
+            String remark
+    );
 
-    public List<KycResponse> getPendingKyc();
+    List<KycResponse> getPendingKyc();
 
-    Long countByStatus(String pending);
+    Long countByStatus(String status);
 
     List<Object[]> getStats();
 
     KycEligibilityResponse checkEligibility(String userId);
 
     List<KycResponse> getKycByStatus(String status);
+
+    List<KycResponse> getCheckerQueue();
 }

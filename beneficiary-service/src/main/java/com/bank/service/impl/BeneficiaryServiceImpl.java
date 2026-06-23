@@ -31,19 +31,24 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
 
     @Override
     @Transactional
-    public BeneficiaryResponse createBeneficiary(CreateBeneficiaryRequest request) {
+    public BeneficiaryResponse createBeneficiary(CreateBeneficiaryRequest request, String makerId) {
 
-        if (repository.existsByCustomerIdAndAccountNumber(request.getCustomerId(),request.getAccountNumber())) {
+        if (repository.existsByCustomerIdAndAccountNumber(
+                request.getCustomerId(), request.getAccountNumber())) {
             throw new BeneficiaryAlreadyExistsException("Beneficiary already exists");
         }
 
-        // Kyc must be APPROVED of this customer.
-        KycEligibilityResponse kycEligibility = kycClient.checkEligibility(request.getCustomerId());
+        KycEligibilityResponse kycEligibility =
+                kycClient.checkEligibility(request.getCustomerId());
+
         if (!kycEligibility.isEligible()) {
-            throw new RuntimeException("Beneficiary Creation blocked: " + kycEligibility.getMessage());
+            throw new IllegalStateException("Beneficiary creation blocked: "
+                    + kycEligibility.getMessage()
+            );
         }
 
         LocalDateTime now = LocalDateTime.now();
+
         Beneficiary beneficiary = Beneficiary.builder()
                 .id(UUID.randomUUID().toString())
                 .customerId(request.getCustomerId())
@@ -53,32 +58,33 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
                 .ifscCode(request.getIfscCode())
                 .nickname(request.getNickname())
                 .status(BeneficiaryStatus.PENDING)
-                .makerId(request.getMakerId())
+                .makerId(makerId)
                 .submittedAt(now)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
 
-        repository.save(beneficiary);
+        Beneficiary savedBeneficiary = repository.save(beneficiary);
 
         publishAudit(
-                beneficiary.getMakerId(),
-                beneficiary.getBeneficiaryName(),
-                "ROLE_MAKER",
+                makerId,
+                savedBeneficiary.getBeneficiaryName(),
+                "ROLE_CUSTOMER",
                 "BENEFICIARY_SUBMITTED_FOR_APPROVAL",
-                beneficiary.getId(),
+                savedBeneficiary.getId(),
                 "Beneficiary submitted for checker approval"
         );
 
         notificationClient.createNotification(
                 NotificationRequest.builder()
-                        .userId(beneficiary.getCustomerId())
+                        .userId(savedBeneficiary.getCustomerId())
                         .title("Beneficiary Pending Approval")
-                        .message(beneficiary.getBeneficiaryName()
+                        .message(savedBeneficiary.getBeneficiaryName()
                                 + " has been submitted for approval")
                         .build()
         );
-        return map(beneficiary);
+
+        return map(savedBeneficiary);
     }
 
     @Override
@@ -91,86 +97,99 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
 
     @Override
     @Transactional
-    public BeneficiaryResponse approveBeneficiary(String beneficiaryId,BeneficiaryApprovalRequest request) {
+    public BeneficiaryResponse approveBeneficiary(String beneficiaryId, String checkerId, String remarks) {
         Beneficiary beneficiary = getBeneficiary(beneficiaryId);
+
         if (beneficiary.getStatus() != BeneficiaryStatus.PENDING) {
-            throw new IllegalStateException("Only pending beneficiary can be approved"
-            );
+            throw new IllegalStateException("Only pending beneficiary can be approved");
         }
 
-        validateMakerChecker(beneficiary, request.getCheckerId());
+        validateMakerChecker(beneficiary, checkerId);
 
         LocalDateTime now = LocalDateTime.now();
 
         beneficiary.setStatus(BeneficiaryStatus.APPROVED);
-        beneficiary.setCheckerId(request.getCheckerId());
-        beneficiary.setCheckerRemark(request.getRemark());
+        beneficiary.setCheckerId(checkerId);
+        beneficiary.setCheckerRemark(remarks == null || remarks.isBlank()
+                ? "Approved by checker" : remarks.trim()
+        );
         beneficiary.setApprovedAt(now);
         beneficiary.setUpdatedAt(now);
 
-        repository.save(beneficiary);
+        Beneficiary approvedBeneficiary = repository.save(beneficiary);
 
         notificationClient.createNotification(
                 NotificationRequest.builder()
-                        .userId(beneficiary.getCustomerId())
+                        .userId(approvedBeneficiary.getCustomerId())
                         .title("Beneficiary Approved")
-                        .message(beneficiary.getBeneficiaryName()
+                        .message(approvedBeneficiary.getBeneficiaryName()
                                 + " has been approved and can now be used for transfers")
                         .build()
         );
 
         publishAudit(
-                request.getCheckerId(),
-                beneficiary.getBeneficiaryName(),
+                checkerId,
+                approvedBeneficiary.getBeneficiaryName(),
                 "ROLE_CHECKER",
-                "BENEFICIARY_APPROVED",
-                beneficiary.getId(),
-                "Beneficiary approved by checker. Remark: " + request.getRemark()
+                "BENEFICIARY_APPROVED_BY_CHECKER",
+                approvedBeneficiary.getId(),
+                "Beneficiary approved by checker: " + checkerId
         );
 
-        return map(beneficiary);
+        return map(approvedBeneficiary);
     }
 
     @Override
     @Transactional
-    public BeneficiaryResponse rejectBeneficiary(String beneficiaryId,BeneficiaryApprovalRequest request) {
+    public BeneficiaryResponse rejectBeneficiary(String beneficiaryId, String checkerId, String remarks) {
         Beneficiary beneficiary = getBeneficiary(beneficiaryId);
         if (beneficiary.getStatus() != BeneficiaryStatus.PENDING) {
             throw new IllegalStateException("Only pending beneficiary can be rejected");
         }
-        validateMakerChecker(beneficiary, request.getCheckerId());
+
+        if (remarks == null || remarks.isBlank()) {
+            throw new IllegalArgumentException("Remarks are required when rejecting a beneficiary");
+        }
+
+        validateMakerChecker(beneficiary, checkerId);
+
         LocalDateTime now = LocalDateTime.now();
+
         beneficiary.setStatus(BeneficiaryStatus.REJECTED);
-        beneficiary.setCheckerId(request.getCheckerId());
-        beneficiary.setCheckerRemark(request.getRemark());
+        beneficiary.setCheckerId(checkerId);
+        beneficiary.setCheckerRemark(remarks.trim());
         beneficiary.setRejectedAt(now);
         beneficiary.setUpdatedAt(now);
-        repository.save(beneficiary);
+
+        Beneficiary rejectedBeneficiary = repository.save(beneficiary);
+
         notificationClient.createNotification(
                 NotificationRequest.builder()
-                        .userId(beneficiary.getCustomerId())
+                        .userId(rejectedBeneficiary.getCustomerId())
                         .title("Beneficiary Rejected")
-                        .message(beneficiary.getBeneficiaryName()
-                                + " was rejected. Reason: " + request.getRemark())
+                        .message(rejectedBeneficiary.getBeneficiaryName()
+                                + " was rejected. Reason: " + remarks.trim())
                         .build()
         );
 
         publishAudit(
-                request.getCheckerId(),
-                beneficiary.getBeneficiaryName(),
+                checkerId,
+                rejectedBeneficiary.getBeneficiaryName(),
                 "ROLE_CHECKER",
-                "BENEFICIARY_REJECTED",
-                beneficiary.getId(),
-                "Beneficiary rejected by checker. Remark: " + request.getRemark()
+                "BENEFICIARY_REJECTED_BY_CHECKER",
+                rejectedBeneficiary.getId(),
+                "Beneficiary rejected by checker: " + checkerId
+                        + ". Remarks: " + remarks.trim()
         );
 
-        return map(beneficiary);
+        return map(rejectedBeneficiary);
     }
 
     @Override
     @Transactional
     public void deleteBeneficiary(String beneficiaryId) {
         Beneficiary beneficiary = getBeneficiary(beneficiaryId);
+
         repository.delete(beneficiary);
 
         publishAudit(
@@ -202,38 +221,35 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
     }
 
     @Override
-    public BeneficiaryEligibilityResponse checkEligibility(String beneficiaryId,String customerId) {
-
-        Beneficiary beneficiary = repository.findById(beneficiaryId)
-                .orElseThrow(() ->
-                        new BeneficiaryNotFoundException("Beneficiary not found"));
-
+    public BeneficiaryEligibilityResponse checkEligibility(String beneficiaryId, String customerId) {
+        Beneficiary beneficiary = getBeneficiary(beneficiaryId);
         if (!beneficiary.getCustomerId().equals(customerId)) {
             throw new IllegalStateException("Beneficiary does not belong to this customer");
         }
 
         boolean eligible = beneficiary.getStatus() == BeneficiaryStatus.APPROVED;
-
         return BeneficiaryEligibilityResponse.builder()
                 .beneficiaryId(beneficiary.getId())
                 .customerId(beneficiary.getCustomerId())
                 .eligible(eligible)
                 .status(beneficiary.getStatus().name())
-                .message(eligible? "Beneficiary is eligible for transaction"
-                        : "Beneficiary must be approved before transaction")
+                .message(eligible ? "Beneficiary is eligible for transaction"
+                        : "Beneficiary must be approved before transaction"
+                )
                 .build();
     }
 
     private Beneficiary getBeneficiary(String beneficiaryId) {
         return repository.findById(beneficiaryId)
-                .orElseThrow(() ->
-                        new BeneficiaryNotFoundException("Beneficiary not found"));
+                .orElseThrow(() -> new BeneficiaryNotFoundException("Beneficiary not found"));
     }
 
-    private void validateMakerChecker(Beneficiary beneficiary,String checkerId) {
+    private void validateMakerChecker(Beneficiary beneficiary, String checkerId) {
+        if (checkerId == null || checkerId.isBlank()) {
+            throw new IllegalArgumentException("Checker ID is required");
+        }
         if (beneficiary.getMakerId().equals(checkerId)) {
-            throw new IllegalStateException("Maker cannot approve or reject their own beneficiary request"
-            );
+            throw new IllegalStateException("Maker cannot approve or reject their own beneficiary request");
         }
     }
 

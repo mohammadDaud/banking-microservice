@@ -26,4 +26,6 @@ public interface KycRepository extends JpaRepository<KycProfile,String> {
             WHERE CAST(k.kycStatus AS string) = :status
             """)
     Long countByKycStatus(String status);
+
+    List<KycProfile> findByKycStatusIn(List<KycStatus> statuses);
 }
