@@ -11,7 +11,7 @@ public class TransferRequest {
 
     private String fromAccount;
 
-    private String toAccount;
+    private String beneficiaryId;
 
     private BigDecimal amount;
 

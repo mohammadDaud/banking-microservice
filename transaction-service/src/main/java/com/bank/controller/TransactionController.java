@@ -29,9 +29,17 @@ public class TransactionController {
     }
 
     @PostMapping("/transfer")
-    public TransactionResponse transfer(@RequestBody TransferRequest request) {
+    public TransactionResponse transfer(
+            @RequestHeader("X-User-Id") String customerId,
+            @RequestHeader(value = "X-User-Roles", required = false) String roles,
+            @RequestBody TransferRequest request) {
+        if (roles != null && !roles.contains("ROLE_CUSTOMER")) {
+            throw new IllegalStateException("Only customers can create transfers");
+        }
+        request.setCustomerId(customerId);
         return service.transfer(request);
     }
+
 
     @GetMapping("/customer/{customerId}")
     public List<TransactionResponse> getCustomerTransactions(@PathVariable String customerId) {

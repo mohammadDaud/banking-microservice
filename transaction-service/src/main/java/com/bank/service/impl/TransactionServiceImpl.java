@@ -114,48 +114,94 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     @Transactional
     public TransactionResponse transfer(TransferRequest request) {
-
+        System.out.println("request================> :"+request.getBeneficiaryId());
         validateTransferRequest(request);
 
+        /*
+         * 1. Validate beneficiary using beneficiary ID.
+         * Beneficiary service checks:
+         * - beneficiary exists
+         * - beneficiary belongs to this customer
+         * - beneficiary status is APPROVED
+         */
         BeneficiaryEligibilityResponse eligibility =
                 beneficiaryClient.checkEligibility(
-                        request.getCustomerId(),
-                        request.getToAccount()
+                        request.getBeneficiaryId(),
+                        request.getCustomerId()
                 );
 
-        if (!eligibility.isEligible()) {
+        if (eligibility == null || !eligibility.isEligible()) {
             throw new RuntimeException(
-                    "Transfer blocked: " + eligibility.getMessage()
+                    "Transfer blocked: "
+                            + (eligibility != null
+                            ? eligibility.getMessage()
+                            : "Beneficiary validation failed")
             );
         }
 
+        /*
+         * Destination account must come from beneficiary service,
+         * never directly from Angular request.
+         */
+        String destinationAccount = eligibility.getAccountNumber();
+
+        if (destinationAccount == null || destinationAccount.isBlank()) {
+            throw new RuntimeException(
+                    "Approved beneficiary account number is missing"
+            );
+        }
+
+        if (request.getFromAccount().equals(destinationAccount)) {
+            throw new RuntimeException(
+                    "Cannot transfer to the same account"
+            );
+        }
+
+        /*
+         * 2. Customer KYC eligibility.
+         */
         KycEligibilityResponse kycEligibility =
                 kycClient.checkEligibility(request.getCustomerId());
 
-        if (!kycEligibility.isEligible()) {
+        if (kycEligibility == null || !kycEligibility.isEligible()) {
             throw new RuntimeException(
-                    "Transfer blocked: " + kycEligibility.getMessage()
+                    "Transfer blocked: "
+                            + (kycEligibility != null
+                            ? kycEligibility.getMessage()
+                            : "KYC validation failed")
             );
         }
 
+        /*
+         * 3. Validate daily/monthly transaction limits.
+         */
         limitValidator.validateTransfer(
                 request.getFromAccount(),
                 request.getAmount()
         );
 
+        /*
+         * 4. Evaluate transfer through Rule Engine.
+         */
         RuleEvaluationResponse ruleResult =
                 evaluateTransferRule(request);
 
+        if (ruleResult == null || ruleResult.getDecision() == null) {
+            throw new RuntimeException(
+                    "Rule engine did not return a valid transfer decision"
+            );
+        }
+
         /*
-         * Rule engine rejects transaction.
-         * No debit / credit happens.
+         * 5. Rule Engine rejects transfer.
+         * No debit/credit happens.
          */
         if ("REJECT".equalsIgnoreCase(ruleResult.getDecision())) {
 
             Transaction rejectedTransaction = saveTransaction(
                     request.getCustomerId(),
                     request.getFromAccount(),
-                    request.getToAccount(),
+                    destinationAccount,
                     request.getAmount(),
                     TransactionType.TRANSFER,
                     request.getDescription()
@@ -199,8 +245,8 @@ public class TransactionServiceImpl implements TransactionService {
         }
 
         /*
-         * Rule engine requires checker approval.
-         * No debit / credit happens here.
+         * 6. Rule Engine requires maker-checker approval.
+         * No debit/credit happens here.
          */
         if ("REQUIRE_CHECKER".equalsIgnoreCase(
                 ruleResult.getDecision())) {
@@ -208,7 +254,7 @@ public class TransactionServiceImpl implements TransactionService {
             Transaction pendingTransaction = saveTransaction(
                     request.getCustomerId(),
                     request.getFromAccount(),
-                    request.getToAccount(),
+                    destinationAccount,
                     request.getAmount(),
                     TransactionType.TRANSFER,
                     request.getDescription()
@@ -267,8 +313,8 @@ public class TransactionServiceImpl implements TransactionService {
         }
 
         /*
-         * Rule engine approves transaction.
-         * Debit and credit happen immediately.
+         * 7. Rule Engine approves transfer.
+         * Debit source and credit verified beneficiary account.
          */
         AmountRequest debitRequest = new AmountRequest();
         debitRequest.setAmount(request.getAmount());
@@ -282,14 +328,14 @@ public class TransactionServiceImpl implements TransactionService {
         creditRequest.setAmount(request.getAmount());
 
         accountClient.credit(
-                request.getToAccount(),
+                destinationAccount,
                 creditRequest
         );
 
         Transaction transaction = saveTransaction(
                 request.getCustomerId(),
                 request.getFromAccount(),
-                request.getToAccount(),
+                destinationAccount,
                 request.getAmount(),
                 TransactionType.TRANSFER,
                 request.getDescription()
@@ -326,7 +372,8 @@ public class TransactionServiceImpl implements TransactionService {
                 "TRANSFER_SUCCESS",
                 "Transfer ₹" + savedTransaction.getAmount()
                         + " transferred successfully to beneficiary "
-                        + eligibility.getBeneficiaryId(),
+                        + eligibility.getBeneficiaryId()
+                        + " (" + destinationAccount + ")",
                 request.getCustomerId()
         );
 
@@ -601,33 +648,25 @@ public class TransactionServiceImpl implements TransactionService {
         return map(rejectedTransaction);
     }
 
-    private void validateTransferRequest(
-            TransferRequest request) {
+    private void validateTransferRequest(TransferRequest request) {
+
+        if (request.getCustomerId() == null
+                || request.getCustomerId().isBlank()) {
+            throw new RuntimeException("Customer ID is required");
+        }
 
         if (request.getFromAccount() == null
                 || request.getFromAccount().isBlank()) {
-            throw new RuntimeException(
-                    "Source account is required"
-            );
+            throw new RuntimeException("Source account is required");
         }
 
-        if (request.getToAccount() == null
-                || request.getToAccount().isBlank()) {
-            throw new RuntimeException(
-                    "Destination account is required"
-            );
-        }
-
-        if (request.getFromAccount()
-                .equals(request.getToAccount())) {
-            throw new RuntimeException(
-                    "Cannot transfer to same account"
-            );
+        if (request.getBeneficiaryId() == null
+                || request.getBeneficiaryId().isBlank()) {
+            throw new RuntimeException("Beneficiary is required");
         }
 
         if (request.getAmount() == null
-                || request.getAmount()
-                .compareTo(BigDecimal.ZERO) <= 0) {
+                || request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
             throw new RuntimeException(
                     "Transfer amount must be greater than zero"
             );

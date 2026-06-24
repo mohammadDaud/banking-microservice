@@ -10,5 +10,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 public interface BeneficiaryClient {
 
     @GetMapping("/api/beneficiaries/{beneficiaryId}/eligibility")
-    BeneficiaryEligibilityResponse checkEligibility(@PathVariable String beneficiaryId,@RequestParam String customerId);
+    BeneficiaryEligibilityResponse checkEligibility(
+            @PathVariable String beneficiaryId,
+            @RequestParam String customerId
+    );
 }

@@ -239,13 +239,21 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
     }
 
     @Override
-    public BeneficiaryEligibilityResponse checkEligibility(String beneficiaryId, String customerId) {
+    public BeneficiaryEligibilityResponse checkEligibility(
+            String beneficiaryId,
+            String customerId) {
+
         Beneficiary beneficiary = getBeneficiary(beneficiaryId);
+
         if (!beneficiary.getCustomerId().equals(customerId)) {
-            throw new IllegalStateException("Beneficiary does not belong to this customer");
+            throw new IllegalStateException(
+                    "This beneficiary does not belong to the logged-in customer"
+            );
         }
 
-        boolean eligible = beneficiary.getStatus() == BeneficiaryStatus.APPROVED;
+        boolean eligible =
+                beneficiary.getStatus() == BeneficiaryStatus.APPROVED;
+
         return BeneficiaryEligibilityResponse.builder()
                 .beneficiaryId(beneficiary.getId())
                 .customerId(beneficiary.getCustomerId())
