@@ -47,10 +47,7 @@ public class BeneficiaryController {
 
     @DeleteMapping("/{beneficiaryId}")
     public void deleteBeneficiary(@PathVariable String beneficiaryId, @RequestHeader("X-User-Id") String loggedInUserId) {
-        /*
-         * Ownership validation will be added in service next.
-         */
-        service.deleteBeneficiary(beneficiaryId);
+        service.deleteBeneficiary(beneficiaryId, loggedInUserId);
     }
 
     @GetMapping("/customer/{customerId}/count")

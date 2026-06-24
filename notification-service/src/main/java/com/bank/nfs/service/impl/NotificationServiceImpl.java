@@ -2,6 +2,8 @@ package com.bank.nfs.service.impl;
 
 import com.bank.nfs.dtos.NotificationRequest;
 import com.bank.nfs.dtos.NotificationResponse;
+import com.bank.nfs.enums.NotificationPriority;
+import com.bank.nfs.enums.NotificationType;
 import com.bank.nfs.exception.NotificationNotFoundException;
 import com.bank.nfs.model.Notification;
 import com.bank.nfs.repository.NotificationRepository;
@@ -29,6 +31,8 @@ public class NotificationServiceImpl implements NotificationService {
                         .userId(request.getUserId())
                         .title(request.getTitle())
                         .message(request.getMessage())
+                        .type(request.getType()==null?NotificationType.KYC:request.getType())
+                        .priority(request.getPriority()==null?NotificationPriority.LOW:request.getPriority())
                         .readFlag(false)
                         .createdAt(LocalDateTime.now())
                         .build();
@@ -99,6 +103,8 @@ public class NotificationServiceImpl implements NotificationService {
                 .id(notification.getId())
                 .title(notification.getTitle())
                 .message(notification.getMessage())
+                .type(notification.getType())
+                .priority(notification.getPriority())
                 .readFlag(notification.getReadFlag())
                 .createdAt(notification.getCreatedAt())
                 .build();

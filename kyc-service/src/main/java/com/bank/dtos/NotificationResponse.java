@@ -1,12 +1,19 @@
 package com.bank.dtos;
 
+import com.bank.enums.NotificationPriority;
+import com.bank.enums.NotificationType;
+import com.fasterxml.jackson.annotation.JsonFormat;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class NotificationResponse {
 
     private String id;
@@ -17,6 +24,10 @@ public class NotificationResponse {
 
     private Boolean readFlag;
 
-    // @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+    private NotificationType type;
+
+    private NotificationPriority priority;
+
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
 }

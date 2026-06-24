@@ -15,7 +15,7 @@ public interface BeneficiaryService {
 
     BeneficiaryResponse rejectBeneficiary(String beneficiaryId, String checkerId, String remarks);
 
-    void deleteBeneficiary(String beneficiaryId);
+    void deleteBeneficiary(String beneficiaryId, String customerId);
 
     Long getBeneficiaryCount(String customerId);
 

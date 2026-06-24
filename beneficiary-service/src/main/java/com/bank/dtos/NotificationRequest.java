@@ -12,4 +12,6 @@ public class NotificationRequest {
     private String title;
 
     private String message;
+    private String type;
+    private String priority;
 }

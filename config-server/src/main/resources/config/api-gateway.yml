@@ -53,13 +53,13 @@ spring:
         - id: beneficiary-service
           uri: lb://beneficiary-service
           predicates:
-            - Path=/api/beneficiaries/**
+            - Path=/api/beneficiaries/**,/api/admin/beneficiaries/**
 
         # KYC SERVICE
         - id: kyc-service
           uri: lb://kyc-service
           predicates:
-            - Path=/api/kyc/**
+            - Path=/api/kyc/**,/api/admin/kyc/**
 
         # NOMINEE SERVICE
         - id: nominee-service
@@ -71,7 +71,7 @@ spring:
         - id: transaction-service
           uri: lb://transaction-service
           predicates:
-            - Path=/api/transactions/**
+            - Path=/api/transactions/**,/api/admin/transactions/**
 
         # NOTIFICATION SERVICE
         - id: notification-service

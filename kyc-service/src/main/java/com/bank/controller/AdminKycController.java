@@ -90,9 +90,9 @@ public class AdminKycController {
 
         return service.getStats()
                 .stream()
-                .map(record -> KycStatResponse.builder()
-                        .status((String) record[0])
-                        .count(((Number) record[1]).longValue())
+                .map(recod -> KycStatResponse.builder()
+                        .status((String) recod[0])
+                        .count(((Number) recod[1]).longValue())
                         .build())
                 .toList();
     }

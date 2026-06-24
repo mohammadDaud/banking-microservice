@@ -29,7 +29,7 @@ spring:
       hibernate:
         format_sql: true
 
-  Kafka:
+  kafka:
     bootstrap-servers: kafka:29092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer

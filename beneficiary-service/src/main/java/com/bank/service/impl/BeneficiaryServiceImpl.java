@@ -81,6 +81,8 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
                         .title("Beneficiary Pending Approval")
                         .message(savedBeneficiary.getBeneficiaryName()
                                 + " has been submitted for approval")
+                        .type("BENEFICIARY")
+                        .priority("HIGH")
                         .build()
         );
 
@@ -124,6 +126,8 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
                         .title("Beneficiary Approved")
                         .message(approvedBeneficiary.getBeneficiaryName()
                                 + " has been approved and can now be used for transfers")
+                        .type("BENEFICIARY")
+                        .priority("HIGH")
                         .build()
         );
 
@@ -169,6 +173,8 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
                         .title("Beneficiary Rejected")
                         .message(rejectedBeneficiary.getBeneficiaryName()
                                 + " was rejected. Reason: " + remarks.trim())
+                        .type("BENEFICIARY")
+                        .priority("HIGH")
                         .build()
         );
 
@@ -187,13 +193,25 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
 
     @Override
     @Transactional
-    public void deleteBeneficiary(String beneficiaryId) {
+    public void deleteBeneficiary(String beneficiaryId, String customerId) {
         Beneficiary beneficiary = getBeneficiary(beneficiaryId);
+
+        if (!beneficiary.getCustomerId().equals(customerId)) {
+            throw new IllegalStateException(
+                    "You can delete only your own beneficiary"
+            );
+        }
+
+        if (beneficiary.getStatus() == BeneficiaryStatus.APPROVED) {
+            throw new IllegalStateException(
+                    "Approved beneficiary cannot be deleted. Contact support if required."
+            );
+        }
 
         repository.delete(beneficiary);
 
         publishAudit(
-                beneficiary.getCustomerId(),
+                customerId,
                 beneficiary.getBeneficiaryName(),
                 "ROLE_CUSTOMER",
                 "BENEFICIARY_REMOVED",
@@ -231,11 +249,14 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
         return BeneficiaryEligibilityResponse.builder()
                 .beneficiaryId(beneficiary.getId())
                 .customerId(beneficiary.getCustomerId())
+                .accountNumber(beneficiary.getAccountNumber())
+                .bankName(beneficiary.getBankName())
+                .ifscCode(beneficiary.getIfscCode())
                 .eligible(eligible)
                 .status(beneficiary.getStatus().name())
-                .message(eligible ? "Beneficiary is eligible for transaction"
-                        : "Beneficiary must be approved before transaction"
-                )
+                .message(eligible
+                        ? "Beneficiary is eligible for transaction"
+                        : "Beneficiary must be approved before transaction")
                 .build();
     }
 
@@ -290,7 +311,7 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
                 .status(beneficiary.getStatus().name())
                 .makerId(beneficiary.getMakerId())
                 .checkerId(beneficiary.getCheckerId())
-                .checkerRemark(beneficiary.getCheckerRemark())
+                .checkerRemarks(beneficiary.getCheckerRemark())
                 .submittedAt(beneficiary.getSubmittedAt())
                 .approvedAt(beneficiary.getApprovedAt())
                 .rejectedAt(beneficiary.getRejectedAt())

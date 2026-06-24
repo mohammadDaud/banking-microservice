@@ -29,7 +29,7 @@ public class BeneficiaryResponse {
 
     private String checkerId;
 
-    private String checkerRemark;
+    private String checkerRemarks;
 
     private LocalDateTime submittedAt;
 
