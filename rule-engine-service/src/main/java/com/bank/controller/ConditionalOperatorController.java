@@ -3,6 +3,7 @@ package com.bank.controller;
 import com.bank.dtos.ConditionalOperatorRequest;
 import com.bank.dtos.ConditionalOperatorResponse;
 import com.bank.service.ConditionalOperatorService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,12 +17,21 @@ public class ConditionalOperatorController {
     private final ConditionalOperatorService service;
 
     @PostMapping("/operator")
-    public ConditionalOperatorResponse create(@RequestBody ConditionalOperatorRequest request) {
+    public ConditionalOperatorResponse create(
+            @RequestHeader("X-User-Id") String adminId,
+            @Valid @RequestBody ConditionalOperatorRequest request) {
+
+        request.setRequestedBy(adminId);
         return service.create(request);
     }
 
     @PutMapping("/operator/{id}")
-    public ConditionalOperatorResponse update(@PathVariable Long id,@RequestBody ConditionalOperatorRequest request) {
+    public ConditionalOperatorResponse update(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") String adminId,
+            @Valid @RequestBody ConditionalOperatorRequest request) {
+
+        request.setRequestedBy(adminId);
         return service.update(id, request);
     }
 
@@ -33,6 +43,7 @@ public class ConditionalOperatorController {
     @GetMapping("/operator")
     public List<ConditionalOperatorResponse> getAll(
             @RequestParam(defaultValue = "true") Boolean activeOnly) {
+
         return service.getAll(activeOnly);
     }
 }

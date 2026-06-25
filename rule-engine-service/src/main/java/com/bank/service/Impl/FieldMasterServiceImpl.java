@@ -28,14 +28,19 @@ public class FieldMasterServiceImpl implements FieldMasterService {
     @Override
     @Transactional
     public FieldMasterResponse create(FieldMasterRequest request) {
-        if (fieldRepository.existsByFieldName(request.getFieldName())) {
-            throw new IllegalArgumentException("Field already exists: " + request.getFieldName());
+
+        String fieldName = request.getFieldName().trim();
+
+        if (fieldRepository.existsByFieldName(fieldName)) {
+            throw new IllegalArgumentException(
+                    "Field already exists: " + fieldName
+            );
         }
 
         LocalDateTime now = LocalDateTime.now();
 
         FieldMaster field = FieldMaster.builder()
-                .fieldName(request.getFieldName().trim())
+                .fieldName(fieldName)
                 .displayName(request.getDisplayName().trim())
                 .dataType(request.getDataType())
                 .description(request.getDescription())
@@ -51,13 +56,18 @@ public class FieldMasterServiceImpl implements FieldMasterService {
 
     @Override
     @Transactional
-    public FieldMasterResponse update(Long id, FieldMasterRequest request) {
+    public FieldMasterResponse update(
+            Long id,
+            FieldMasterRequest request) {
+
         FieldMaster field = getEntity(id);
 
         field.setDisplayName(request.getDisplayName().trim());
         field.setDataType(request.getDataType());
         field.setDescription(request.getDescription());
-        field.setIsActive(request.getIsActive() == null || request.getIsActive());
+        field.setIsActive(
+                request.getIsActive() == null || request.getIsActive()
+        );
         field.setUpdatedBy(request.getRequestedBy());
         field.setUpdatedAt(LocalDateTime.now());
 
@@ -65,17 +75,22 @@ public class FieldMasterServiceImpl implements FieldMasterService {
     }
 
     @Override
+    @Transactional
     public FieldMasterResponse getById(Long id) {
         return map(getEntity(id));
     }
 
     @Override
+    @Transactional
     public List<FieldMasterResponse> getAll(Boolean activeOnly) {
+
         List<FieldMaster> fields = Boolean.TRUE.equals(activeOnly)
                 ? fieldRepository.findByIsActiveTrueOrderByDisplayNameAsc()
                 : fieldRepository.findAll();
 
-        return fields.stream().map(this::map).toList();
+        return fields.stream()
+                .map(this::map)
+                .toList();
     }
 
     @Override
@@ -88,44 +103,83 @@ public class FieldMasterServiceImpl implements FieldMasterService {
 
         ConditionalOperator operator = operatorRepository
                 .findById(request.getOperatorId())
-                .orElseThrow(() -> new IllegalArgumentException("Operator not found"));
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Operator not found: "
+                                        + request.getOperatorId()
+                        )
+                );
 
-        if (mappingRepository.existsByFieldIdAndOperatorId(fieldId, operator.getId())) {
-            throw new IllegalArgumentException("Operator is already mapped to this field");
+        if (!Boolean.TRUE.equals(operator.getIsActive())) {
+            throw new IllegalArgumentException(
+                    "Cannot map inactive operator: "
+                            + operator.getShortName()
+            );
         }
 
-        mappingRepository.save(
-                FieldOperatorMapping.builder()
-                        .field(field)
-                        .operator(operator)
-                        .createdAt(LocalDateTime.now())
-                        .build()
-        );
+        if (mappingRepository.existsByFieldIdAndOperatorId(
+                fieldId,
+                operator.getId())) {
 
-        return map(field);
+            throw new IllegalArgumentException(
+                    "Operator is already mapped to this field"
+            );
+        }
+
+        FieldOperatorMapping mapping = FieldOperatorMapping.builder()
+                .field(field)
+                .operator(operator)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        mappingRepository.save(mapping);
+
+        /*
+         * Important:
+         * Reload after saving mapping, so allowedOperators
+         * contains the newly added operator in API response.
+         */
+        return map(getEntity(fieldId));
     }
 
     @Override
     @Transactional
-    public FieldMasterResponse removeOperator(Long fieldId, Long operatorId) {
+    public FieldMasterResponse removeOperator(
+            Long fieldId,
+            Long operatorId) {
+
         getEntity(fieldId);
 
-        if (!mappingRepository.existsByFieldIdAndOperatorId(fieldId, operatorId)) {
-            throw new IllegalArgumentException("Operator mapping not found");
+        if (!mappingRepository.existsByFieldIdAndOperatorId(
+                fieldId,
+                operatorId)) {
+
+            throw new IllegalArgumentException(
+                    "Operator mapping not found"
+            );
         }
 
-        mappingRepository.deleteByFieldIdAndOperatorId(fieldId, operatorId);
+        mappingRepository.deleteByFieldIdAndOperatorId(
+                fieldId,
+                operatorId
+        );
 
         return map(getEntity(fieldId));
     }
 
     private FieldMaster getEntity(Long id) {
         return fieldRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Field not found: " + id));
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Field not found: " + id
+                        )
+                );
     }
 
     private FieldMasterResponse map(FieldMaster field) {
-        List<String> allowedOperators = mappingRepository.findByFieldId(field.getId())
+
+        List<String> allowedOperators = mappingRepository
+                .findByFieldId(field.getId())
                 .stream()
                 .map(mapping -> mapping.getOperator().getShortName())
                 .toList();

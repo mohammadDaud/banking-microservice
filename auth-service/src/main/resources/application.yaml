@@ -35,6 +35,12 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+    validate-migration-naming: true
 
 eureka:
   client:
@@ -45,6 +51,13 @@ jwt:
   secret: F7wez7S50RGr2wIvJ03oUPDOzvxmsEQZROunPOg/Jiem3q8sOIAUtsYaM41yzcIMCxkG8yag874v3Ae1foB4/A==
   expiration: 900000
   refresh-expiration: 604800000
+
+internal:
+  service:
+    transaction-service:
+      # ${TRANSACTION_SERVICE_CLIENT_SECRET_HASH}
+      client-secret: TaXqnpo65lef3wH1Iej0A7/J8WGco3FNMA9UP5KKfP9BnPmNQFDm9u4ZOb+sLyOjpVFeBiKhjetabbinWlZQYA==
+    token-expiration-ms: 300000
 
 logging:
   level:

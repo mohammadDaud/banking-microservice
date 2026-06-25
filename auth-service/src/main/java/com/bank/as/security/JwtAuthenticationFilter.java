@@ -39,7 +39,11 @@ public class JwtAuthenticationFilter
                 || path.startsWith("/api/auth/register")
                 || path.startsWith("/api/auth/verify-otp")
                 || path.startsWith("/api/auth/verify-email")
-                || path.startsWith("/api/auth/logout")) {
+                || path.startsWith("/api/auth/logout")
+                || path.startsWith("/api/auth/refresh")
+                || path.startsWith("/api/auth/forgot-password")
+                || path.startsWith("/api/auth/reset-password")
+                || path.startsWith("/api/auth/internal/token")) {
 
             filterChain.doFilter(request, response);
             return;

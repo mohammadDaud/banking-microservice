@@ -101,6 +101,11 @@ public class AdminTransactionController {
         );
     }
 
+    @GetMapping("/reversal-required")
+    public List<TransactionResponse> getReversalRequiredTransactions() {
+        return service.getReversalRequiredTransactions();
+    }
+
     private void validateCheckerRole(String roles) {
         if (roles == null) {
             throw new RuntimeException("User roles are missing");

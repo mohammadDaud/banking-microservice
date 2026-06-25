@@ -8,9 +8,11 @@ public enum TransactionStatus {
 
     FAILED,
 
-    REVERSED,
+    REVERSAL_REQUIRED,
 
     PENDING_APPROVAL,
+
+    PROCESSING_APPROVAL,
 
     REJECTED
 }

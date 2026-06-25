@@ -1,9 +1,12 @@
 package com.bank.accs.repository;
 
 import com.bank.accs.model.Account;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -13,6 +16,16 @@ import java.util.Optional;
 public interface AccountRepository extends JpaRepository<Account, String> {
 
     Optional<Account> findByAccountNumber(String accountNumber);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT a
+            FROM Account a
+            WHERE a.accountNumber = :accountNumber
+            """)
+    Optional<Account> findByAccountNumberForUpdate(
+            @Param("accountNumber") String accountNumber
+    );
 
     List<Account> findByCustomerId(String customerId);
 
@@ -24,12 +37,14 @@ public interface AccountRepository extends JpaRepository<Account, String> {
 
     List<Account> findByAvailableBalanceLessThan(BigDecimal amount);
 
-
-
     long countByAccountStatus(String status);
 
     List<Account> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
-    @Query("SELECT a.accountType, COUNT(a) FROM Account a GROUP BY a.accountType")
+    @Query("""
+            SELECT a.accountType, COUNT(a)
+            FROM Account a
+            GROUP BY a.accountType
+            """)
     List<Object[]> getAccountTypeStats();
 }

@@ -22,6 +22,19 @@ public class Transaction {
     @Id
     private String id;
 
+    /*
+     * Optimistic locking version.
+     *
+     * Hibernate automatically:
+     * - starts with version 0 for a new row
+     * - increments it on every update
+     * - prevents two checker requests from updating the same
+     *   PENDING_APPROVAL transaction at the same time.
+     */
+    @Version
+    @Column(nullable = false)
+    private Long version;
+
     @Column(unique = true)
     private String transactionReference;
 
@@ -70,4 +83,15 @@ public class Transaction {
 
     @Column(name = "rule_reason", length = 1000)
     private String ruleReason;
+
+    /* reversal failure */
+
+    @Column(name = "failure_reason", length = 2000)
+    private String failureReason;
+
+    @Column(name = "reversal_attempted_at")
+    private LocalDateTime reversalAttemptedAt;
+
+    @Column(name = "reversal_completed_at")
+    private LocalDateTime reversalCompletedAt;
 }

@@ -7,11 +7,14 @@ import com.bank.common.topics.KafkaTopics;
 import com.bank.dtos.*;
 import com.bank.enums.TransactionStatus;
 import com.bank.enums.TransactionType;
+import com.bank.exception.RuleEngineUnavailableException;
 import com.bank.kafka.KafkaEventPublisher;
 import com.bank.model.Transaction;
 import com.bank.repository.TransactionRepository;
 import com.bank.service.TransactionService;
+import feign.FeignException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,8 +22,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class TransactionServiceImpl implements TransactionService {
@@ -35,15 +42,15 @@ public class TransactionServiceImpl implements TransactionService {
     private final KycClient kycClient;
     private final RuleEngineClient ruleEngineClient;
 
+    private final TransactionApprovalRecoveryService approvalRecoveryService;
+    private final TransferCompensationService transferCompensationService;
+    private final TransferExecutionService transferExecutionService;
+
     @Override
     @Transactional
     public TransactionResponse deposit(AmountTransactionRequest request) {
-
-        AmountRequest amountRequest = new AmountRequest();
-        amountRequest.setAmount(request.getAmount());
-
-        accountClient.credit(request.getAccountNumber(), amountRequest);
-
+        validateAmountTransactionRequest(request, "Deposit");
+        creditAccount(request.getAccountNumber(), request.getAmount());
         Transaction transaction = saveTransaction(
                 request.getCustomerId(),
                 request.getAccountNumber(),
@@ -76,12 +83,8 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     @Transactional
     public TransactionResponse withdraw(AmountTransactionRequest request) {
-
-        AmountRequest amountRequest = new AmountRequest();
-        amountRequest.setAmount(request.getAmount());
-
-        accountClient.debit(request.getAccountNumber(), amountRequest);
-
+        validateAmountTransactionRequest(request, "Withdrawal");
+        debitAccount(request.getAccountNumber(), request.getAmount());
         Transaction transaction = saveTransaction(
                 request.getCustomerId(),
                 request.getAccountNumber(),
@@ -91,14 +94,11 @@ public class TransactionServiceImpl implements TransactionService {
                 request.getDescription()
         );
 
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(request.getCustomerId())
-                        .title("Withdrawal Successful")
-                        .message("₹ " + request.getAmount() + " withdrawn successfully")
-                        .type("TRANSACTION")
-                        .priority("MEDIUM")
-                        .build()
+        publishNotification(
+                request.getCustomerId(),
+                "Withdrawal Successful",
+                "₹ " + request.getAmount() + " withdrawn successfully",
+                "MEDIUM"
         );
 
         publishTransferAudit(
@@ -111,55 +111,47 @@ public class TransactionServiceImpl implements TransactionService {
         return map(transaction);
     }
 
+    /*
+     * No @Transactional here.
+     *
+     * This method calls remote Account Service APIs.
+     * Transaction database status changes are saved through
+     * TransferExecutionService using REQUIRES_NEW transactions.
+     */
     @Override
-    @Transactional
     public TransactionResponse transfer(TransferRequest request) {
-        System.out.println("request================> :"+request.getBeneficiaryId());
+        log.info(
+                "Transfer request received. customerId={}, beneficiaryId={}, amount={}",
+                request.getCustomerId(),
+                request.getBeneficiaryId(),
+                request.getAmount()
+        );
         validateTransferRequest(request);
-
-        /*
-         * 1. Validate beneficiary using beneficiary ID.
-         * Beneficiary service checks:
-         * - beneficiary exists
-         * - beneficiary belongs to this customer
-         * - beneficiary status is APPROVED
-         */
-        BeneficiaryEligibilityResponse eligibility =
+        BeneficiaryEligibilityResponse beneficiaryEligibility =
                 beneficiaryClient.checkEligibility(
                         request.getBeneficiaryId(),
                         request.getCustomerId()
                 );
 
-        if (eligibility == null || !eligibility.isEligible()) {
+        if (beneficiaryEligibility == null || !beneficiaryEligibility.isEligible()) {
             throw new RuntimeException(
                     "Transfer blocked: "
-                            + (eligibility != null
-                            ? eligibility.getMessage()
+                            + (beneficiaryEligibility != null
+                            ? beneficiaryEligibility.getMessage()
                             : "Beneficiary validation failed")
             );
         }
 
-        /*
-         * Destination account must come from beneficiary service,
-         * never directly from Angular request.
-         */
-        String destinationAccount = eligibility.getAccountNumber();
+        String destinationAccount = beneficiaryEligibility.getAccountNumber();
 
         if (destinationAccount == null || destinationAccount.isBlank()) {
-            throw new RuntimeException(
-                    "Approved beneficiary account number is missing"
-            );
+            throw new RuntimeException("Approved beneficiary account number is missing");
         }
 
         if (request.getFromAccount().equals(destinationAccount)) {
-            throw new RuntimeException(
-                    "Cannot transfer to the same account"
-            );
+            throw new RuntimeException("Cannot transfer to the same account");
         }
 
-        /*
-         * 2. Customer KYC eligibility.
-         */
         KycEligibilityResponse kycEligibility =
                 kycClient.checkEligibility(request.getCustomerId());
 
@@ -172,280 +164,85 @@ public class TransactionServiceImpl implements TransactionService {
             );
         }
 
-        /*
-         * 3. Validate daily/monthly transaction limits.
-         */
         limitValidator.validateTransfer(
                 request.getFromAccount(),
                 request.getAmount()
         );
 
-        /*
-         * 4. Evaluate transfer through Rule Engine.
-         */
-        RuleEvaluationResponse ruleResult =
-                evaluateTransferRule(request);
+        RuleEvaluationResponse ruleResult = evaluateTransferRule(request);
 
-        if (ruleResult == null || ruleResult.getDecision() == null) {
-            throw new RuntimeException(
-                    "Rule engine did not return a valid transfer decision"
-            );
-        }
+        validateRuleDecision(ruleResult);
 
-        /*
-         * 5. Rule Engine rejects transfer.
-         * No debit/credit happens.
-         */
         if ("REJECT".equalsIgnoreCase(ruleResult.getDecision())) {
-
-            Transaction rejectedTransaction = saveTransaction(
-                    request.getCustomerId(),
-                    request.getFromAccount(),
+            return createRuleRejectedTransaction(
+                    request,
                     destinationAccount,
-                    request.getAmount(),
-                    TransactionType.TRANSFER,
-                    request.getDescription()
+                    ruleResult
             );
-
-            rejectedTransaction.setTransactionStatus(
-                    TransactionStatus.REJECTED
-            );
-            rejectedTransaction.setRuleCode(
-                    ruleResult.getMatchedRuleCode()
-            );
-            rejectedTransaction.setRuleReason(
-                    ruleResult.getReason()
-            );
-
-            Transaction savedTransaction =
-                    repository.save(rejectedTransaction);
-
-            publishTransferAudit(
-                    savedTransaction,
-                    "TRANSFER_REJECTED_BY_RULE",
-                    "Transfer rejected by BRE rule: "
-                            + ruleResult.getReason(),
-                    request.getCustomerId()
-            );
-
-            notificationClient.createNotification(
-                    NotificationRequest.builder()
-                            .userId(request.getCustomerId())
-                            .title("Transfer Rejected")
-                            .message(
-                                    "Your transfer was rejected: "
-                                            + ruleResult.getReason()
-                            )
-                            .type("TRANSACTION")
-                            .priority("HIGH")
-                            .build()
-            );
-
-            return map(savedTransaction);
         }
 
-        /*
-         * 6. Rule Engine requires maker-checker approval.
-         * No debit/credit happens here.
-         */
-        if ("REQUIRE_CHECKER".equalsIgnoreCase(
-                ruleResult.getDecision())) {
-
-            Transaction pendingTransaction = saveTransaction(
-                    request.getCustomerId(),
-                    request.getFromAccount(),
+        if ("REQUIRE_CHECKER".equalsIgnoreCase(ruleResult.getDecision())) {
+            return createPendingApprovalTransaction(
+                    request,
                     destinationAccount,
-                    request.getAmount(),
-                    TransactionType.TRANSFER,
-                    request.getDescription()
+                    ruleResult
             );
-
-            pendingTransaction.setTransactionStatus(
-                    TransactionStatus.PENDING_APPROVAL
-            );
-            pendingTransaction.setRuleCode(
-                    ruleResult.getMatchedRuleCode()
-            );
-            pendingTransaction.setRuleReason(
-                    ruleResult.getReason()
-            );
-
-            Transaction savedTransaction =
-                    repository.save(pendingTransaction);
-
-            publishTransferAudit(
-                    savedTransaction,
-                    "TRANSFER_PENDING_APPROVAL",
-                    "Transfer requires checker approval. Rule: "
-                            + ruleResult.getMatchedRuleCode(),
-                    request.getCustomerId()
-            );
-
-            notificationClient.createNotification(
-                    NotificationRequest.builder()
-                            .userId(request.getCustomerId())
-                            .title("Transfer Pending Approval")
-                            .message(
-                                    "Your transfer of ₹"
-                                            + request.getAmount()
-                                            + " is pending checker approval"
-                            )
-                            .type("TRANSACTION")
-                            .priority("HIGH")
-                            .build()
-            );
-
-            kafkaEventPublisher.publish(
-                    KafkaTopics.NOTIFICATION_TOPIC,
-                    NotificationEvent.builder()
-                            .userId(request.getCustomerId())
-                            .title("Transfer Pending Approval")
-                            .message(
-                                    "₹" + request.getAmount()
-                                            + " transfer is waiting for checker approval"
-                            )
-                            .type("TRANSACTION")
-                            .priority("HIGH")
-                            .build()
-            );
-
-            return map(savedTransaction);
         }
 
-        /*
-         * 7. Rule Engine approves transfer.
-         * Debit source and credit verified beneficiary account.
-         */
-        AmountRequest debitRequest = new AmountRequest();
-        debitRequest.setAmount(request.getAmount());
-
-        accountClient.debit(
-                request.getFromAccount(),
-                debitRequest
-        );
-
-        AmountRequest creditRequest = new AmountRequest();
-        creditRequest.setAmount(request.getAmount());
-
-        accountClient.credit(
+        return executeAutoApprovedTransfer(
+                request,
                 destinationAccount,
-                creditRequest
+                ruleResult,
+                beneficiaryEligibility.getBeneficiaryId()
         );
-
-        Transaction transaction = saveTransaction(
-                request.getCustomerId(),
-                request.getFromAccount(),
-                destinationAccount,
-                request.getAmount(),
-                TransactionType.TRANSFER,
-                request.getDescription()
-        );
-
-        transaction.setTransactionStatus(
-                TransactionStatus.SUCCESS
-        );
-        transaction.setRuleCode(
-                ruleResult.getMatchedRuleCode()
-        );
-        transaction.setRuleReason(
-                ruleResult.getReason()
-        );
-
-        Transaction savedTransaction =
-                repository.save(transaction);
-
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(request.getCustomerId())
-                        .title("Transfer Successful")
-                        .message(
-                                "₹ " + request.getAmount()
-                                        + " transferred successfully"
-                        )
-                        .type("TRANSACTION")
-                        .priority("MEDIUM")
-                        .build()
-        );
-
-        publishTransferAudit(
-                savedTransaction,
-                "TRANSFER_SUCCESS",
-                "Transfer ₹" + savedTransaction.getAmount()
-                        + " transferred successfully to beneficiary "
-                        + eligibility.getBeneficiaryId()
-                        + " (" + destinationAccount + ")",
-                request.getCustomerId()
-        );
-
-        kafkaEventPublisher.publish(
-                KafkaTopics.NOTIFICATION_TOPIC,
-                NotificationEvent.builder()
-                        .userId(savedTransaction.getCustomerId())
-                        .title("Transaction Successful")
-                        .message(
-                                "₹" + savedTransaction.getAmount()
-                                        + " transferred successfully"
-                        )
-                        .type("TRANSACTION")
-                        .priority("MEDIUM")
-                        .build()
-        );
-
-        return map(savedTransaction);
     }
 
     @Override
-    public List<TransactionResponse> getCustomerTransactions(
-            String customerId) {
-
-        return repository
-                .findByCustomerIdOrderByTransactionDateDesc(customerId)
+    @Transactional(readOnly = true)
+    public List<TransactionResponse> getCustomerTransactions(String customerId) {
+        return repository.findByCustomerIdOrderByTransactionDateDesc(customerId)
                 .stream()
                 .map(this::map)
                 .toList();
     }
 
     @Override
-    public List<TransactionResponse> getAccountTransactions(
-            String accountNumber) {
-
-        return repository
-                .findBySourceAccountOrderByTransactionDateDesc(accountNumber)
+    @Transactional(readOnly = true)
+    public List<TransactionResponse> getAccountTransactions(String accountNumber) {
+        return repository.findBySourceAccountOrderByTransactionDateDesc(accountNumber)
                 .stream()
                 .map(this::map)
                 .toList();
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Long getTransactionCount(String customerId) {
         return repository.countByCustomerId(customerId);
     }
 
     @Override
-    public List<TransactionResponse> getRecentTransactions(
-            String customerId) {
-
-        return repository
-                .findTop5ByCustomerIdOrderByCreatedAtDesc(customerId)
+    @Transactional(readOnly = true)
+    public List<TransactionResponse> getRecentTransactions(String customerId) {
+        return repository.findTop5ByCustomerIdOrderByCreatedAtDesc(customerId)
                 .stream()
                 .map(this::map)
                 .toList();
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<TransactionResponse> getAllTransactions() {
-        return repository
-                .findAllByOrderByCreatedAtDesc()
+        return repository.findAllByOrderByCreatedAtDesc()
                 .stream()
                 .map(this::map)
                 .toList();
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Long countTodayTransactions() {
-
         LocalDate today = LocalDate.now();
-
         return repository.countTodayTransactions(
                 today.atStartOfDay(),
                 today.plusDays(1).atStartOfDay()
@@ -453,14 +250,14 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<Object[]> getMonthlyStats() {
         return repository.getMonthlyStats();
     }
 
     @Override
-    public List<Transaction> findAllByOrderByTransactionDateDesc(
-            PageRequest pageRequest) {
-
+    @Transactional(readOnly = true)
+    public List<Transaction> findAllByOrderByTransactionDateDesc(PageRequest pageRequest) {
         return repository.findAllByOrderByTransactionDateDesc(
                 PageRequest.of(
                         pageRequest.getPageNumber(),
@@ -470,6 +267,7 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<StatementTransactionResponse>
     findBySourceAccountAndTransactionDateBetweenOrderByTransactionDateDesc(
             String accountNumber,
@@ -488,8 +286,8 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<TransactionResponse> getPendingApprovalTransactions() {
-
         return repository
                 .findByTransactionStatusOrderByCreatedAtDesc(
                         TransactionStatus.PENDING_APPROVAL
@@ -499,83 +297,82 @@ public class TransactionServiceImpl implements TransactionService {
                 .toList();
     }
 
+    /*
+     * No @Transactional here.
+     *
+     * The claim query, success update, recovery update and compensation
+     * update all use separate REQUIRES_NEW transactions.
+     */
     @Override
-    @Transactional
-    public TransactionResponse approvePendingTransaction(
-            String transactionId,
-            String checkerId,
-            String remarks) {
+    public TransactionResponse approvePendingTransaction(String transactionId, String checkerId, String remarks) {
+        validateCheckerId(checkerId);
+        Transaction pendingTransaction = repository
+                .findByIdAndTransactionStatus(transactionId, TransactionStatus.PENDING_APPROVAL)
+                .orElseThrow(() -> new RuntimeException("Pending transaction not found or already processed: " + transactionId
+                ));
 
-        Transaction transaction =
-                getPendingTransaction(transactionId);
-
-        validateCheckerIsNotMaker(
-                transaction,
-                checkerId
+        validateCheckerIsNotMaker(pendingTransaction, checkerId);
+        int claimed = repository.claimPendingTransactionForApproval(
+                transactionId,
+                TransactionStatus.PENDING_APPROVAL,
+                TransactionStatus.PROCESSING_APPROVAL,
+                checkerId,
+                remarks,
+                LocalDateTime.now()
         );
 
-        AmountRequest debitRequest = new AmountRequest();
-        debitRequest.setAmount(transaction.getAmount());
+        if (claimed == 0) {
+            throw new RuntimeException("This transaction was already claimed or processed by another checker");
+        }
 
-        accountClient.debit(
-                transaction.getSourceAccount(),
-                debitRequest
-        );
+        Transaction transaction = repository.findById(transactionId)
+                .orElseThrow(() -> new RuntimeException("Transaction not found after approval claim: " + transactionId));
 
-        AmountRequest creditRequest = new AmountRequest();
-        creditRequest.setAmount(transaction.getAmount());
+        boolean sourceDebited = false;
 
-        accountClient.credit(
-                transaction.getDestinationAccount(),
-                creditRequest
-        );
+        try {
+            debitAccount(transaction.getSourceAccount(), transaction.getAmount());
+            sourceDebited = true;
+            creditAccount(transaction.getDestinationAccount(), transaction.getAmount());
+            Transaction approvedTransaction =
+                    transferExecutionService.markSuccess(transaction.getId());
+            publishTransferAudit(
+                    approvedTransaction,
+                    "TRANSFER_APPROVED_BY_CHECKER",
+                    "Transfer approved by checker: " + checkerId,
+                    checkerId
+            );
+            publishNotification(
+                    approvedTransaction.getCustomerId(),
+                    "Transfer Approved",
+                    "₹" + approvedTransaction.getAmount()
+                            + " transfer has been approved",
+                    "HIGH"
+            );
+            return map(approvedTransaction);
 
-        transaction.setTransactionStatus(
-                TransactionStatus.SUCCESS
-        );
-        transaction.setCheckerId(checkerId);
-        transaction.setCheckerRemarks(remarks);
-        transaction.setCheckerActionAt(LocalDateTime.now());
+        } catch (Exception ex) {
+            log.error(
+                    "Checker approval transfer failed. transactionId={}",
+                    transactionId,
+                    ex
+            );
+            if (sourceDebited) {
+                transferCompensationService.compensateAfterCreditFailure(
+                        transactionId,
+                        safeExceptionMessage(ex)
+                );
+            } else {
+                approvalRecoveryService.resetToPending(transactionId);
+            }
 
-        Transaction approvedTransaction =
-                repository.save(transaction);
-
-        publishTransferAudit(
-                approvedTransaction,
-                "TRANSFER_APPROVED_BY_CHECKER",
-                "Transfer approved by checker: " + checkerId,
-                checkerId
-        );
-
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(approvedTransaction.getCustomerId())
-                        .title("Transfer Approved")
-                        .message(
-                                "Your transfer of ₹"
-                                        + approvedTransaction.getAmount()
-                                        + " has been approved and completed"
-                        )
-                        .type("TRANSACTION")
-                        .priority("HIGH")
-                        .build()
-        );
-
-        kafkaEventPublisher.publish(
-                KafkaTopics.NOTIFICATION_TOPIC,
-                NotificationEvent.builder()
-                        .userId(approvedTransaction.getCustomerId())
-                        .title("Transfer Approved")
-                        .message(
-                                "₹" + approvedTransaction.getAmount()
-                                        + " transfer has been approved"
-                        )
-                        .type("TRANSACTION")
-                        .priority("HIGH")
-                        .build()
-        );
-
-        return map(approvedTransaction);
+            throw new RuntimeException(
+                    sourceDebited
+                            ? "Transfer approval failed. Reversal was started for the debited amount."
+                            : "Transfer approval failed before debit. Transaction moved back to pending approval.",
+                    ex
+            );
+        }
     }
 
     @Override
@@ -585,146 +382,333 @@ public class TransactionServiceImpl implements TransactionService {
             String checkerId,
             String remarks) {
 
+        validateCheckerId(checkerId);
+
         if (remarks == null || remarks.isBlank()) {
             throw new RuntimeException(
                     "Remarks are required when rejecting a transaction"
             );
         }
 
-        Transaction transaction =
-                getPendingTransaction(transactionId);
-
-        validateCheckerIsNotMaker(
-                transaction,
-                checkerId
-        );
-
-        transaction.setTransactionStatus(
-                TransactionStatus.REJECTED
-        );
+        Transaction transaction = getPendingTransaction(transactionId);
+        validateCheckerIsNotMaker(transaction, checkerId);
+        transaction.setTransactionStatus(TransactionStatus.REJECTED);
         transaction.setCheckerId(checkerId);
         transaction.setCheckerRemarks(remarks);
         transaction.setCheckerActionAt(LocalDateTime.now());
 
-        Transaction rejectedTransaction =
-                repository.save(transaction);
+        try {
+            Transaction rejectedTransaction = repository.saveAndFlush(transaction);
+            publishTransferAudit(
+                    rejectedTransaction,
+                    "TRANSFER_REJECTED_BY_CHECKER",
+                    "Transfer rejected by checker: " + checkerId,
+                    checkerId
+            );
+            publishNotification(
+                    rejectedTransaction.getCustomerId(),
+                    "Transfer Rejected",
+                    "Your transfer of ₹" + rejectedTransaction.getAmount()
+                            + " was rejected by checker. Remarks: " + remarks,
+                    "HIGH"
+            );
+            return map(rejectedTransaction);
 
+        } catch (org.springframework.orm.ObjectOptimisticLockingFailureException ex) {
+            throw new RuntimeException(
+                    "This transaction was already processed by another checker. Refresh the list."
+            );
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<TransactionResponse> getReversalRequiredTransactions() {
+        return repository
+                .findByTransactionStatusOrderByCreatedAtDesc(TransactionStatus.REVERSAL_REQUIRED)
+                .stream()
+                .map(this::map)
+                .toList();
+    }
+
+    private TransactionResponse createRuleRejectedTransaction(
+            TransferRequest request,
+            String destinationAccount,
+            RuleEvaluationResponse ruleResult) {
+
+        Transaction transaction = saveTransaction(
+                request.getCustomerId(),
+                request.getFromAccount(),
+                destinationAccount,
+                request.getAmount(),
+                TransactionType.TRANSFER,
+                request.getDescription()
+        );
+
+        transaction.setTransactionStatus(TransactionStatus.REJECTED);
+        transaction.setRuleCode(ruleResult.getMatchedRuleCode());
+        transaction.setRuleReason(ruleResult.getReason());
+        Transaction savedTransaction = repository.save(transaction);
         publishTransferAudit(
-                rejectedTransaction,
-                "TRANSFER_REJECTED_BY_CHECKER",
-                "Transfer rejected by checker: " + checkerId,
-                checkerId
+                savedTransaction,
+                "TRANSFER_REJECTED_BY_RULE",
+                "Transfer rejected by BRE rule: " + safeReason(ruleResult),
+                request.getCustomerId()
         );
 
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(rejectedTransaction.getCustomerId())
-                        .title("Transfer Rejected")
-                        .message(
-                                "Your transfer of ₹"
-                                        + rejectedTransaction.getAmount()
-                                        + " was rejected by checker. Remarks: "
-                                        + remarks
-                        )
-                        .type("TRANSACTION")
-                        .priority("HIGH")
-                        .build()
+        publishNotification(
+                request.getCustomerId(),
+                "Transfer Rejected",
+                "Your transfer was rejected: " + safeReason(ruleResult),
+                "HIGH"
         );
 
-        kafkaEventPublisher.publish(
-                KafkaTopics.NOTIFICATION_TOPIC,
-                NotificationEvent.builder()
-                        .userId(rejectedTransaction.getCustomerId())
-                        .title("Transfer Rejected")
-                        .message(
-                                "₹" + rejectedTransaction.getAmount()
-                                        + " transfer was rejected"
-                        )
-                        .type("TRANSACTION")
-                        .priority("HIGH")
-                        .build()
+        return map(savedTransaction);
+    }
+
+    private TransactionResponse createPendingApprovalTransaction(
+            TransferRequest request,
+            String destinationAccount,
+            RuleEvaluationResponse ruleResult) {
+
+        Transaction transaction = saveTransaction(
+                request.getCustomerId(),
+                request.getFromAccount(),
+                destinationAccount,
+                request.getAmount(),
+                TransactionType.TRANSFER,
+                request.getDescription()
         );
 
-        return map(rejectedTransaction);
+        transaction.setTransactionStatus(TransactionStatus.PENDING_APPROVAL);
+        transaction.setRuleCode(ruleResult.getMatchedRuleCode());
+        transaction.setRuleReason(ruleResult.getReason());
+        Transaction savedTransaction = repository.save(transaction);
+        publishTransferAudit(
+                savedTransaction,
+                "TRANSFER_PENDING_APPROVAL",
+                "Transfer requires checker approval. Rule: "
+                        + ruleResult.getMatchedRuleCode(),
+                request.getCustomerId()
+        );
+
+        publishNotification(
+                request.getCustomerId(),
+                "Transfer Pending Approval",
+                "₹" + request.getAmount()
+                        + " transfer is waiting for checker approval",
+                "HIGH"
+        );
+
+        return map(savedTransaction);
+    }
+
+    private TransactionResponse executeAutoApprovedTransfer(
+            TransferRequest request,
+            String destinationAccount,
+            RuleEvaluationResponse ruleResult,
+            String beneficiaryId) {
+
+        Transaction transaction = buildTransaction(
+                request.getCustomerId(),
+                request.getFromAccount(),
+                destinationAccount,
+                request.getAmount(),
+                TransactionType.TRANSFER,
+                request.getDescription()
+        );
+
+        transaction.setRuleCode(ruleResult.getMatchedRuleCode());
+        transaction.setRuleReason(ruleResult.getReason());
+        Transaction processingTransaction =
+                transferExecutionService.saveProcessing(transaction);
+        boolean sourceDebited = false;
+        try {
+            debitAccount(
+                    processingTransaction.getSourceAccount(),
+                    processingTransaction.getAmount()
+            );
+            sourceDebited = true;
+            creditAccount(
+                    processingTransaction.getDestinationAccount(),
+                    processingTransaction.getAmount()
+            );
+            Transaction savedTransaction =
+                    transferExecutionService.markSuccess(processingTransaction.getId());
+            publishTransferAudit(
+                    savedTransaction,
+                    "TRANSFER_SUCCESS",
+                    "Transfer ₹" + savedTransaction.getAmount()
+                            + " transferred successfully to beneficiary "
+                            + beneficiaryId,
+                    request.getCustomerId()
+            );
+            publishNotification(
+                    savedTransaction.getCustomerId(),
+                    "Transaction Successful",
+                    "₹" + savedTransaction.getAmount()
+                            + " transferred successfully",
+                    "MEDIUM"
+            );
+            return map(savedTransaction);
+
+        } catch (Exception ex) {
+            log.error(
+                    "Auto-approved transfer failed. transactionId={}",
+                    processingTransaction.getId(),
+                    ex
+            );
+            if (sourceDebited) {
+                transferCompensationService.compensateAfterCreditFailure(
+                        processingTransaction.getId(),
+                        safeExceptionMessage(ex)
+                );
+            } else {
+                transferExecutionService.markDebitFailed(
+                        processingTransaction.getId(),
+                        safeExceptionMessage(ex)
+                );
+            }
+            throw new RuntimeException(
+                    sourceDebited
+                            ? "Transfer failed. Reversal was started for the debited amount."
+                            : "Transfer failed. No amount was debited.",
+                    ex
+            );
+        }
     }
 
     private void validateTransferRequest(TransferRequest request) {
+        if (request == null) {
+            throw new RuntimeException("Transfer request is required");
+        }
 
-        if (request.getCustomerId() == null
-                || request.getCustomerId().isBlank()) {
+        if (request.getCustomerId() == null || request.getCustomerId().isBlank()) {
             throw new RuntimeException("Customer ID is required");
         }
 
-        if (request.getFromAccount() == null
-                || request.getFromAccount().isBlank()) {
+        if (request.getFromAccount() == null || request.getFromAccount().isBlank()) {
             throw new RuntimeException("Source account is required");
         }
 
-        if (request.getBeneficiaryId() == null
-                || request.getBeneficiaryId().isBlank()) {
+        if (request.getBeneficiaryId() == null || request.getBeneficiaryId().isBlank()) {
             throw new RuntimeException("Beneficiary is required");
         }
 
         if (request.getAmount() == null
                 || request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new RuntimeException(
-                    "Transfer amount must be greater than zero"
-            );
+            throw new RuntimeException("Transfer amount must be greater than zero");
         }
     }
 
-    private Transaction getPendingTransaction(
-            String transactionId) {
+    private void validateAmountTransactionRequest(AmountTransactionRequest request, String transactionName) {
+        if (request == null) {
+            throw new RuntimeException(transactionName + " request is required");
+        }
 
-        return repository.findByIdAndTransactionStatus(
-                        transactionId,
-                        TransactionStatus.PENDING_APPROVAL
-                )
-                .orElseThrow(() -> new RuntimeException(
-                        "Pending transaction not found or already processed: "
-                                + transactionId
+        if (request.getCustomerId() == null || request.getCustomerId().isBlank()) {
+            throw new RuntimeException("Customer ID is required");
+        }
+
+        if (request.getAccountNumber() == null || request.getAccountNumber().isBlank()) {
+            throw new RuntimeException("Account number is required");
+        }
+
+        if (request.getAmount() == null || request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new RuntimeException(transactionName + " amount must be greater than zero");
+        }
+    }
+
+    private void validateRuleDecision(RuleEvaluationResponse ruleResult) {
+
+        if (ruleResult == null
+                || ruleResult.getDecision() == null
+                || ruleResult.getDecision().isBlank()) {
+            throw new RuntimeException("Rule Engine did not return a valid transfer decision");
+        }
+        String decision = ruleResult.getDecision().trim();
+        boolean validDecision =
+                "REJECT".equalsIgnoreCase(decision)
+                        || "REQUIRE_CHECKER".equalsIgnoreCase(decision)
+                        || "AUTO_APPROVE".equalsIgnoreCase(decision)
+                        || "APPROVE".equalsIgnoreCase(decision);
+
+        if (!validDecision) {
+            throw new RuntimeException("Invalid Rule Engine decision: " + ruleResult.getDecision());
+        }
+    }
+
+    private Transaction getPendingTransaction(String transactionId) {
+        return repository.findByIdAndTransactionStatus(transactionId, TransactionStatus.PENDING_APPROVAL)
+                .orElseThrow(() -> new RuntimeException("Pending transaction not found or already processed: " + transactionId
                 ));
     }
 
-    private void validateCheckerIsNotMaker(
-            Transaction transaction,
-            String checkerId) {
-
+    private void validateCheckerId(String checkerId) {
         if (checkerId == null || checkerId.isBlank()) {
-            throw new RuntimeException(
-                    "Checker ID is required"
-            );
-        }
-
-        if (transaction.getMakerId() != null
-                && transaction.getMakerId()
-                .equals(checkerId)) {
-            throw new RuntimeException(
-                    "Maker cannot approve or reject their own transaction"
-            );
+            throw new RuntimeException("Checker ID is required");
         }
     }
 
-    private RuleEvaluationResponse evaluateTransferRule(
-            TransferRequest request) {
+    private void validateCheckerIsNotMaker(Transaction transaction, String checkerId) {
+        if (transaction.getMakerId() != null && transaction.getMakerId().equals(checkerId)) {
+            throw new RuntimeException("Maker cannot approve or reject their own transaction");
+        }
+    }
+
+    private RuleEvaluationResponse evaluateTransferRule(TransferRequest request) {
 
         Map<String, Object> payload = new HashMap<>();
-
         payload.put("amount", request.getAmount());
 
         /*
-         * Temporary values.
-         * Replace later with customer profile and beneficiary bank data.
+         * Replace later with real customer / beneficiary data.
          */
         payload.put("customerType", "REGULAR");
         payload.put("bankType", "EXTERNAL");
 
-        return ruleEngineClient.evaluate(
-                RuleEvaluationRequest.builder()
-                        .ruleType("TRANSFER")
-                        .payload(payload)
-                        .build()
-        );
+        try {
+            RuleEvaluationResponse response = ruleEngineClient.evaluate(
+                    RuleEvaluationRequest.builder()
+                            .ruleType("TRANSFER")
+                            .payload(payload)
+                            .build()
+            );
+
+            if (response == null || response.getDecision() == null || response.getDecision().isBlank()) {
+                throw new RuleEngineUnavailableException("Transfer cannot be processed because Rule " +
+                        "Engine returned an invalid decision.", null);
+            }
+
+            return response;
+
+        } catch (FeignException.ServiceUnavailable ex) {
+            throw new RuleEngineUnavailableException("Transfer cannot be processed because Rule Engine Service is " +
+                    "currently unavailable. Please try again later.", ex);
+
+        } catch (FeignException ex) {
+            throw new RuleEngineUnavailableException("Transfer cannot be processed because Rule Engine Service could not" +
+                    " evaluate this transfer. Please try again later.", ex);
+
+        } catch (RuleEngineUnavailableException ex) {
+            throw ex;
+
+        } catch (Exception ex) {
+            throw new RuleEngineUnavailableException("Transfer cannot be processed because Rule Engine Service is unavailable." +
+                    " Please try again later.", ex);
+        }
+    }
+
+    private void debitAccount(String accountNumber, BigDecimal amount) {
+        AmountRequest request = new AmountRequest();
+        request.setAmount(amount);
+        accountClient.debit(accountNumber, request);
+    }
+
+    private void creditAccount(String accountNumber, BigDecimal amount) {
+        AmountRequest request = new AmountRequest();
+        request.setAmount(amount);
+        accountClient.credit(accountNumber, request);
     }
 
     private Transaction saveTransaction(
@@ -735,14 +719,31 @@ public class TransactionServiceImpl implements TransactionService {
             TransactionType type,
             String description) {
 
-        String referenceNumber =
-                transactionReferenceClient
-                        .generateTransactionReference()
-                        .getReferenceNumber();
+        return repository.save(
+                buildTransaction(
+                        customerId,
+                        sourceAccount,
+                        destinationAccount,
+                        amount,
+                        type,
+                        description
+                )
+        );
+    }
 
+    private Transaction buildTransaction(
+            String customerId,
+            String sourceAccount,
+            String destinationAccount,
+            BigDecimal amount,
+            TransactionType type,
+            String description) {
+
+        String referenceNumber = transactionReferenceClient
+                .generateTransactionReference()
+                .getReferenceNumber();
         LocalDateTime now = LocalDateTime.now();
-
-        Transaction transaction = Transaction.builder()
+        return Transaction.builder()
                 .id(UUID.randomUUID().toString())
                 .transactionReference(referenceNumber)
                 .customerId(customerId)
@@ -756,73 +757,57 @@ public class TransactionServiceImpl implements TransactionService {
                 .transactionDate(now)
                 .createdAt(now)
                 .build();
-
-        return repository.save(transaction);
     }
 
-    private TransactionResponse map(
-            Transaction transaction) {
-
+    private TransactionResponse map(Transaction transaction) {
         return TransactionResponse.builder()
                 .id(transaction.getId())
-                .transactionReference(
-                        transaction.getTransactionReference()
-                )
-                .sourceAccount(
-                        transaction.getSourceAccount()
-                )
-                .destinationAccount(
-                        transaction.getDestinationAccount()
-                )
-                .transactionType(
-                        transaction.getTransactionType()
-                )
-                .transactionStatus(
-                        transaction.getTransactionStatus()
-                )
+                .transactionReference(transaction.getTransactionReference())
+                .sourceAccount(transaction.getSourceAccount())
+                .destinationAccount(transaction.getDestinationAccount())
+                .transactionType(transaction.getTransactionType())
+                .transactionStatus(transaction.getTransactionStatus())
                 .amount(transaction.getAmount())
                 .description(transaction.getDescription())
-                .transactionDate(
-                        transaction.getTransactionDate()
-                )
+                .transactionDate(transaction.getTransactionDate())
                 .makerId(transaction.getMakerId())
                 .checkerId(transaction.getCheckerId())
-                .checkerRemarks(
-                        transaction.getCheckerRemarks()
-                )
-                .checkerActionAt(
-                        transaction.getCheckerActionAt()
-                )
+                .checkerRemarks(transaction.getCheckerRemarks())
+                .checkerActionAt(transaction.getCheckerActionAt())
                 .ruleCode(transaction.getRuleCode())
                 .ruleReason(transaction.getRuleReason())
                 .build();
     }
 
-    private StatementTransactionResponse mapTransaction(
-            Transaction transaction) {
-
+    private StatementTransactionResponse mapTransaction(Transaction transaction) {
         return StatementTransactionResponse.builder()
-                .transactionReference(
-                        transaction.getTransactionReference()
-                )
-                .sourceAccount(
-                        transaction.getSourceAccount()
-                )
-                .destinationAccount(
-                        transaction.getDestinationAccount()
-                )
-                .transactionType(
-                        transaction.getTransactionType().name()
-                )
-                .transactionStatus(
-                        transaction.getTransactionStatus().name()
-                )
+                .transactionReference(transaction.getTransactionReference())
+                .sourceAccount(transaction.getSourceAccount())
+                .destinationAccount(transaction.getDestinationAccount())
+                .transactionType(transaction.getTransactionType().name())
+                .transactionStatus(transaction.getTransactionStatus().name())
                 .amount(transaction.getAmount())
                 .description(transaction.getDescription())
-                .transactionDate(
-                        transaction.getTransactionDate()
-                )
+                .transactionDate(transaction.getTransactionDate())
                 .build();
+    }
+
+    private void publishNotification(
+            String userId,
+            String title,
+            String message,
+            String priority) {
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.NOTIFICATION_TOPIC,
+                NotificationEvent.builder()
+                        .userId(userId)
+                        .title(title)
+                        .message(message)
+                        .type("TRANSACTION")
+                        .priority(priority)
+                        .build()
+        );
     }
 
     private void publishTransferAudit(
@@ -844,5 +829,17 @@ public class TransactionServiceImpl implements TransactionService {
                         .createdAt(LocalDateTime.now())
                         .build()
         );
+    }
+
+    private String safeReason(RuleEvaluationResponse ruleResult) {
+        return ruleResult.getReason() == null || ruleResult.getReason().isBlank()
+                ? "Rule Engine rejected this transfer"
+                : ruleResult.getReason();
+    }
+
+    private String safeExceptionMessage(Exception ex) {
+        return ex.getMessage() == null || ex.getMessage().isBlank()
+                ? ex.getClass().getSimpleName()
+                : ex.getMessage();
     }
 }

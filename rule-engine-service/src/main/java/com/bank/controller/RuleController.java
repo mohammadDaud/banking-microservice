@@ -4,6 +4,7 @@ import com.bank.dtos.RuleRequest;
 import com.bank.dtos.RuleResponse;
 import com.bank.enums.RuleType;
 import com.bank.service.RuleService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,12 +18,21 @@ public class RuleController {
     private final RuleService service;
 
     @PostMapping("/rules")
-    public RuleResponse create(@RequestBody RuleRequest request) {
+    public RuleResponse create(
+            @RequestHeader("X-User-Id") String adminId,
+            @Valid @RequestBody RuleRequest request) {
+
+        request.setRequestedBy(adminId);
         return service.create(request);
     }
 
     @PutMapping("/rules/{id}")
-    public RuleResponse update(@PathVariable Long id,@RequestBody RuleRequest request) {
+    public RuleResponse update(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") String adminId,
+            @Valid @RequestBody RuleRequest request) {
+
+        request.setRequestedBy(adminId);
         return service.update(id, request);
     }
 
@@ -32,7 +42,8 @@ public class RuleController {
     }
 
     @GetMapping("/rules")
-    public List<RuleResponse> getAll(@RequestParam(required = false) RuleType ruleType,
+    public List<RuleResponse> getAll(
+            @RequestParam(required = false) RuleType ruleType,
             @RequestParam(defaultValue = "true") Boolean activeOnly) {
 
         return service.getAll(ruleType, activeOnly);

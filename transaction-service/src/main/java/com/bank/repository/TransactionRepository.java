@@ -2,8 +2,11 @@ package com.bank.repository;
 
 import com.bank.enums.TransactionStatus;
 import com.bank.model.Transaction;
+import feign.Param;
+import jakarta.transaction.Transactional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.math.BigDecimal;
@@ -84,4 +87,30 @@ public interface TransactionRepository  extends JpaRepository<Transaction,String
     List<Transaction> findByTransactionStatusOrderByCreatedAtDesc(TransactionStatus transactionStatus);
 
     Optional<Transaction> findByIdAndTransactionStatus(String id, TransactionStatus transactionStatus);
+
+    /*
+     * Atomically claim a pending transaction for checker approval.
+     *
+     * Returns 1 only for the first checker.
+     * Returns 0 when another checker already claimed or processed it.
+     */
+    @Modifying
+    @Transactional
+    @Query("""
+        UPDATE Transaction t
+        SET t.transactionStatus = :processingStatus,
+            t.checkerId = :checkerId,
+            t.checkerRemarks = :remarks,
+            t.checkerActionAt = :actionAt
+        WHERE t.id = :transactionId
+          AND t.transactionStatus = :pendingStatus
+        """)
+    int claimPendingTransactionForApproval(
+            @Param("transactionId") String transactionId,
+            @Param("pendingStatus") TransactionStatus pendingStatus,
+            @Param("processingStatus") TransactionStatus processingStatus,
+            @Param("checkerId") String checkerId,
+            @Param("remarks") String remarks,
+            @Param("actionAt") LocalDateTime actionAt
+    );
 }

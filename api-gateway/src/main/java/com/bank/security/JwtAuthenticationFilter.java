@@ -94,7 +94,11 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         String userId = jwtService.extractUserId(token);
         List<String> roles = jwtService.extractRoles(token);
 
-        if (!routeRoleValidator.hasAccess(path, roles)) {
+        if (!routeRoleValidator.hasAccess(
+                path,
+                exchange.getRequest().getMethod(),
+                roles
+        )) {
             log.warn(
                     "Access denied. User={} Roles={} Path={}",
                     username,

@@ -22,63 +22,65 @@ import org.springframework.web.client.RestTemplate;
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    private final JwtAuthenticationFilter
-            jwtAuthenticationFilter;
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
-
         return new BCryptPasswordEncoder();
     }
 
     @Bean
-    public AuthenticationManager
-    authenticationManager(
-            AuthenticationConfiguration config)
-            throws Exception {
+    public AuthenticationManager authenticationManager(
+            AuthenticationConfiguration config) throws Exception {
 
         return config.getAuthenticationManager();
     }
 
     @Bean
-    public SecurityFilterChain
-    securityFilterChain(
-            HttpSecurity http)
-            throws Exception {
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http) throws Exception {
 
         http
                 .csrf(csrf -> csrf.disable())
-                .sessionManagement(
-                        session ->
-                                session.sessionCreationPolicy(
-                                        SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth ->
-                        auth
-                                .requestMatchers(
-                                        "/api/auth/**",
-                                        "/swagger-ui.html",
-                                        "/swagger-ui/**",
-                                        "/v3/api-docs/**",
-                                        "/v3/api-docs",
-                                        "/swagger-resources/**",
-                                        "/webjars/**",
-                                        "/actuator/**")
-                                .permitAll()
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(
+                                SessionCreationPolicy.STATELESS
+                        )
+                )
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(
+                                "/api/auth/register",
+                                "/api/auth/login",
+                                "/api/auth/verify-otp",
+                                "/api/auth/refresh",
+                                "/api/auth/logout",
+                                "/api/auth/verify-email",
+                                "/api/auth/forgot-password",
+                                "/api/auth/reset-password",
+                                "/api/auth/internal/token",
+                                "/swagger-ui.html",
+                                "/swagger-ui/**",
+                                "/v3/api-docs/**",
+                                "/v3/api-docs",
+                                "/swagger-resources/**",
+                                "/webjars/**",
+                                "/actuator/**"
+                        )
+                        .permitAll()
 
-                                .requestMatchers(
-                                        "/api/admin/**")
-                                .hasRole("ADMIN")
+                        .requestMatchers("/api/admin/**")
+                        .hasRole("ADMIN")
 
-                                .requestMatchers(
-                                        "/api/customer/**")
-                                .hasRole("CUSTOMER")
+                        .requestMatchers("/api/customer/**")
+                        .hasRole("CUSTOMER")
 
-                                .anyRequest()
-                                .authenticated())
-
+                        .anyRequest()
+                        .authenticated()
+                )
                 .addFilterBefore(
                         jwtAuthenticationFilter,
-                        UsernamePasswordAuthenticationFilter.class);
+                        UsernamePasswordAuthenticationFilter.class
+                );
 
         return http.build();
     }

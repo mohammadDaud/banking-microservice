@@ -1,29 +1,38 @@
 package com.bank.security;
 
+import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
 
+
 @Component
 public class RouteRoleValidator {
 
-    private static final Map<String, String> ROLE_MAPPING =
-            Map.of(
-                    "/api/admin/", "ROLE_ADMIN",
-                    "/api/customer/", "ROLE_CUSTOMER",
-                    "/api/manager/", "ROLE_MANAGER"
-            );
-
-    public boolean hasAccess(String path, List<String> roles) {
+    public boolean hasAccess(
+            String path,
+            HttpMethod method,
+            List<String> roles) {
 
         if (roles == null || roles.isEmpty()) {
             return false;
         }
 
         /*
+         * Internal Account Service balance APIs.
+         *
+         * These are never allowed through API Gateway.
+         * Transaction Service calls Account Service directly using
+         * a short-lived ROLE_INTERNAL_SERVICE JWT.
+         */
+        if (isInternalAccountBalanceEndpoint(path, method)) {
+            return false;
+        }
+
+        /*
          * Transaction maker-checker endpoints:
-         * both ADMIN and CHECKER can view/approve/reject pending transfers.
+         * ADMIN and CHECKER can view/approve/reject pending transfers.
          */
         if (path.startsWith("/api/admin/transactions/pending")
                 || path.matches("^/api/admin/transactions/[^/]+/(approve|reject)$")) {
@@ -32,7 +41,7 @@ public class RouteRoleValidator {
         }
 
         /*
-         * Other /api/admin/** APIs remain ADMIN-only.
+         * Other admin APIs remain ADMIN-only.
          */
         if (path.startsWith("/api/admin/")) {
             return hasRole(roles, "ROLE_ADMIN");
@@ -47,6 +56,17 @@ public class RouteRoleValidator {
         }
 
         return true;
+    }
+
+    private boolean isInternalAccountBalanceEndpoint(
+            String path,
+            HttpMethod method) {
+
+        if (method != HttpMethod.PUT) {
+            return false;
+        }
+
+        return path.matches("^/api/accounts/[^/]+/(credit|debit)$");
     }
 
     private boolean hasRole(List<String> roles, String requiredRole) {

@@ -40,4 +40,6 @@ public interface TransactionService {
             String remarks
     );
     List<TransactionResponse> getPendingApprovalTransactions();
+
+    List<TransactionResponse> getReversalRequiredTransactions();
 }

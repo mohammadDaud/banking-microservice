@@ -18,7 +18,7 @@ public class TransactionLimitController {
         return service.getLimit(accountNumber);
     }
 
-    @PutMapping("/{accountNumber}")
+    @PutMapping("/limits/{accountNumber}")
     public TransactionLimitResponse update(@PathVariable String accountNumber,@RequestBody TransactionLimitRequest request) {
         return service.updateLimit(accountNumber,request);
     }

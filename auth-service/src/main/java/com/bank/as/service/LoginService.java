@@ -28,6 +28,10 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class LoginService {
+
+    private static final String ROLE_INTERNAL_SERVICE =
+            "ROLE_INTERNAL_SERVICE";
+
     private final UserRepository userRepository;
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
@@ -38,7 +42,6 @@ public class LoginService {
     private final OtpVerificationRepository otpRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final PasswordHistoryRepository passwordHistoryRepository;
-    private final AuditService auditService;
     private final KafkaEventPublisher kafkaEventPublisher;
 
     @Value("${security.max-failed-attempts}")
@@ -47,160 +50,134 @@ public class LoginService {
     @Value("${security.lock-duration-minutes}")
     private long lockDuration;
 
+    public LoginResponse authenticate(
+            LoginRequest request,
+            HttpServletRequest servletRequest) {
 
-    public LoginResponse authenticate( LoginRequest request, HttpServletRequest servletRequest) {
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.getUsername(),
-                        request.getPassword()));
-        User user =
-                userRepository
-                        .findByUsername(
-                                request.getUsername())
-                        .orElseThrow(() -> {
+        User user = userRepository
+                .findByUsername(request.getUsername())
+                .orElseThrow(() -> {
 
-                            loginAuditService.saveAudit(
-                                    null,
-                                    request.getUsername(),
-                                    IpUtil.getClientIp(
-                                            servletRequest),
-                                    false,
-                                    "USER_NOT_FOUND");
+                    loginAuditService.saveAudit(
+                            null,
+                            request.getUsername(),
+                            IpUtil.getClientIp(servletRequest),
+                            false,
+                            "USER_NOT_FOUND"
+                    );
 
-                            return new InvalidCredentialsException(
-                                    "Invalid username or password");
-                        });
+                    return new InvalidCredentialsException(
+                            "Invalid username or password"
+                    );
+                });
 
-        if (!Boolean.TRUE.equals(
-                user.getEmailVerified())) {
-
-            throw new EmailNotVerifiedException(
-                    "Please verify your email first.");
+        /*
+         * Technical accounts must never use the customer/admin OTP login flow.
+         * They receive a short-lived JWT only from:
+         * POST /api/auth/internal/token
+         */
+        if (isInternalServiceAccount(user)) {
+            throw new InvalidCredentialsException(
+                    "Internal service accounts cannot use user login"
+            );
         }
 
-        checkLockStatus(
-                user,
-                servletRequest);
+        checkLockStatus(user, servletRequest);
 
-        if (!passwordEncoder.matches(
-                request.getPassword(),
-                user.getPassword())) {
-
-            increaseFailedAttempts(
-                    user,
-                    servletRequest);
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(
+                            request.getUsername(),
+                            request.getPassword()
+                    )
+            );
+        } catch (Exception ex) {
+            increaseFailedAttempts(user, servletRequest);
 
             throw new InvalidCredentialsException(
-                    "Invalid username or password");
+                    "Invalid username or password"
+            );
+        }
+
+        if (!Boolean.TRUE.equals(user.getEmailVerified())) {
+            throw new EmailNotVerifiedException(
+                    "Please verify your email first."
+            );
         }
 
         resetFailedAttempts(user);
 
-        String otp =
-                otpService.createOtp(
-                        user.getId());
-
-/*notificationEventProducer
-        .sendEmailEvent(
-                 EmailNotificationEvent.builder()
-                        .to(user.getEmail())
-                        .subject("Your OTP Code")
-                        .body("Your OTP code is: " + otp + "\n\nThis code expires in 5 minutes.")
-                        .build()
-                        );*/
+        String otp = otpService.createOtp(user.getId());
 
         kafkaEventPublisher.publish(
                 KafkaTopics.EMAIL_NOTIFICATION_TOPIC,
-                EmailNotificationEvent
-                        .builder()
+                EmailNotificationEvent.builder()
                         .to(user.getEmail())
                         .subject("Your OTP Code")
-                        .body("Your OTP code is: " + otp + "\n\nThis code expires in 5 minutes.")
-                        .build()
-        );
-        /*loginAuditService.saveAudit(
-                user.getId(),
-                user.getUsername(),
-                IpUtil.getClientIp(
-                        servletRequest),
-                true,
-                "OTP_SENT");*/
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
-                AuditEvent.builder()
-                        .userId(user.getId())
-                        .username(user.getUsername())
-                        .role(user.getRoles().stream().findFirst().map(Role::getRoleName).orElse("CUSTOMER"))
-                        .module("AUTH")
-                        .action("OTP_SUCCESS")
-                        .entityId(user.getId())
-                        .entityType("USER")
-                        .ipAddress(IpUtil.getClientIp(servletRequest))
-                        .description("Otp Send successfully")
-                        .createdAt(LocalDateTime.now())
+                        .body(
+                                "Your OTP code is: "
+                                        + otp
+                                        + "\n\nThis code expires in 5 minutes."
+                        )
                         .build()
         );
 
+        publishAudit(
+                user,
+                "AUTH",
+                "OTP_SUCCESS",
+                "OTP sent successfully",
+                servletRequest
+        );
+
         return LoginResponse.builder()
-                .message(
-                        "OTP sent successfully")
+                .message("OTP sent successfully")
                 .otpRequired(true)
                 .build();
     }
 
-    public AuthResponse verifyOtp(
-            VerifyOtpRequest request) {
+    public AuthResponse verifyOtp(VerifyOtpRequest request) {
 
-        User user =
-                userRepository
-                        .findByUsername(
-                                request.getUsername())
-                        .orElseThrow(() ->
-                                new InvalidCredentialsException(
-                                        "User not found"));
+        User user = userRepository
+                .findByUsername(request.getUsername())
+                .orElseThrow(() -> new InvalidCredentialsException(
+                        "User not found"
+                ));
 
-        OtpVerification otpEntity =
-                otpRepository
-                        .findTopByUserIdOrderByCreatedAtDesc(
-                                user.getId())
-                        .orElseThrow(() ->
-                                new OtpNotVerifiedException(
-                                        "OTP not found"));
-
-        if (otpEntity.getExpiryTime()
-                .isBefore(
-                        LocalDateTime.now())) {
-
-            throw new OtpNotVerifiedException(
-                    "OTP expired");
+        if (isInternalServiceAccount(user)) {
+            throw new InvalidCredentialsException(
+                    "Internal service accounts cannot verify OTP"
+            );
         }
 
-        if (!otpEntity.getOtp()
-                .equals(
-                        request.getOtp())) {
+        OtpVerification otpEntity = otpRepository
+                .findTopByUserIdOrderByCreatedAtDesc(user.getId())
+                .orElseThrow(() -> new OtpNotVerifiedException(
+                        "OTP not found"
+                ));
 
-            throw new OtpNotVerifiedException(
-                    "Invalid OTP");
+        if (otpEntity.getExpiryTime().isBefore(LocalDateTime.now())) {
+            throw new OtpNotVerifiedException("OTP expired");
+        }
+
+        if (!otpEntity.getOtp().equals(request.getOtp())) {
+            throw new OtpNotVerifiedException("Invalid OTP");
         }
 
         otpEntity.setVerified(true);
+        otpRepository.save(otpEntity);
 
-        otpRepository.save(
-                otpEntity);
+        String accessToken = jwtService.generateAccessToken(user);
 
-        String accessToken =
-                jwtService.generateToken(
-                        user);
+        RefreshToken refreshToken = refreshTokenService
+                .createRefreshToken(user);
 
-        RefreshToken refreshToken =
-                refreshTokenService
-                        .createRefreshToken(
-                                user);
-        String role =
-                user.getRoles()
-                        .stream()
-                        .findFirst()
-                        .map(Role::getRoleName)
-                        .orElse("ROLE_CUSTOMER");
+        String role = user.getRoles()
+                .stream()
+                .findFirst()
+                .map(Role::getRoleName)
+                .orElse("ROLE_CUSTOMER");
+
         return AuthResponse.builder()
                 .accessToken(accessToken)
                 .refreshToken(refreshToken.getToken())
@@ -210,331 +187,149 @@ public class LoginService {
                 .build();
     }
 
-    public String forgotPassword(
-            ForgotPasswordRequest request) {
+    public String forgotPassword(ForgotPasswordRequest request) {
 
-        User user =
-                userRepository
-                        .findByEmail(
-                                request.getEmail())
-                        .orElseThrow(() ->
-                                new EmailNotVerifiedException(
-                                        "Email not found"));
+        User user = userRepository
+                .findByEmail(request.getEmail())
+                .orElseThrow(() -> new EmailNotVerifiedException(
+                        "Email not found"
+                ));
 
-        String token =
-                UUID.randomUUID().toString();
+        if (isInternalServiceAccount(user)) {
+            throw new InvalidCredentialsException(
+                    "Password reset is not allowed for internal service accounts"
+            );
+        }
 
-        PasswordResetToken resetToken =
-                PasswordResetToken.builder()
-                        .token(token)
-                        .userId(user.getId())
-                        .used(false)
-                        .createdAt(
-                                LocalDateTime.now())
-                        .expiryTime(
-                                LocalDateTime.now()
-                                        .plusMinutes(15))
-                        .build();
+        String token = UUID.randomUUID().toString();
 
-        passwordResetTokenRepository
-                .save(resetToken);
+        PasswordResetToken resetToken = PasswordResetToken.builder()
+                .token(token)
+                .userId(user.getId())
+                .used(false)
+                .createdAt(LocalDateTime.now())
+                .expiryTime(LocalDateTime.now().plusMinutes(15))
+                .build();
+
+        passwordResetTokenRepository.save(resetToken);
 
         String resetUrl =
                 "http://localhost:8081/api/auth/reset-password?token="
                         + token;
 
-        /*emailService.sendPasswordResetEmail(
-                user.getEmail(),
-                resetUrl);*/
-        /*notificationEventProducer.sendEmailEvent(EmailNotificationEvent.builder()
-                        .to(user.getEmail())
-                        .subject("Password Reset Request")
-                        .body("Click below link to reset your password:\n\n"
-                                + resetUrl +
-                                "\n\nThis link expires in 15 minutes.")
-                        .build());*/
         kafkaEventPublisher.publish(
                 KafkaTopics.EMAIL_NOTIFICATION_TOPIC,
-                EmailNotificationEvent
-                        .builder()
+                EmailNotificationEvent.builder()
                         .to(user.getEmail())
                         .subject("Password Reset Request")
-                        .body("Click below link to reset your password:\n\n"
-                                + resetUrl +
-                                "\n\nThis link expires in 15 minutes.")
+                        .body(
+                                "Click below link to reset your password:\n\n"
+                                        + resetUrl
+                                        + "\n\nThis link expires in 15 minutes."
+                        )
                         .build()
         );
+
         return "Password reset link sent successfully";
     }
 
     @Transactional
     public String resetPassword(
-            ResetPasswordRequest request,HttpServletRequest servletRequest) {
+            ResetPasswordRequest request,
+            HttpServletRequest servletRequest) {
 
-        PasswordResetToken resetToken =
-                passwordResetTokenRepository
-                        .findByToken(
-                                request.getToken())
-                        .orElseThrow(() ->
-                                new InvalidResetTokenException(
-                                        "Invalid reset token"));
+        PasswordResetToken resetToken = passwordResetTokenRepository
+                .findByToken(request.getToken())
+                .orElseThrow(() -> new InvalidResetTokenException(
+                        "Invalid reset token"
+                ));
 
-        if (Boolean.TRUE.equals(
-                resetToken.getUsed())) {
-
+        if (Boolean.TRUE.equals(resetToken.getUsed())) {
             throw new InvalidResetTokenException(
-                    "Reset token already used");
+                    "Reset token already used"
+            );
         }
 
-        if (resetToken.getExpiryTime()
-                .isBefore(
-                        LocalDateTime.now())) {
-
-            throw new InvalidResetTokenException(
-                    "Reset token expired");
+        if (resetToken.getExpiryTime().isBefore(LocalDateTime.now())) {
+            throw new InvalidResetTokenException("Reset token expired");
         }
 
-        User user =
-                userRepository
-                        .findById(
-                                resetToken.getUserId())
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "User not found"));
+        User user = userRepository
+                .findById(resetToken.getUserId())
+                .orElseThrow(() -> new RuntimeException(
+                        "User not found"
+                ));
 
-        validatePasswordHistory(
-                user,
-                request.getNewPassword());
+        if (isInternalServiceAccount(user)) {
+            throw new InvalidCredentialsException(
+                    "Password reset is not allowed for internal service accounts"
+            );
+        }
 
-        user.setPassword(
-                passwordEncoder.encode(
-                        request.getNewPassword()));
+        validatePasswordHistory(user, request.getNewPassword());
 
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
 
-        // SAVE NEW PASSWORD INTO HISTORY
         passwordHistoryRepository.save(
                 PasswordHistory.builder()
-                        .userId(
-                                user.getId())
-                        .passwordHash(
-                                user.getPassword())
-                        .createdAt(
-                                LocalDateTime.now())
-                        .build());
+                        .userId(user.getId())
+                        .passwordHash(user.getPassword())
+                        .createdAt(LocalDateTime.now())
+                        .build()
+        );
 
         resetToken.setUsed(true);
+        passwordResetTokenRepository.save(resetToken);
 
-        passwordResetTokenRepository.save(
-                resetToken);
-
-        /*emailService.sendEmailMsg(
-                user.getEmail(),
-                "Password Changed Successfully",
-                "Your password has been updated successfully.");*/
-       /* notificationEventProducer.sendEmailEvent(EmailNotificationEvent.builder()
-                        .to(user.getEmail())
-                        .subject("Password Changed Successfully")
-                        .body("Your password has been updated successfully.")
-                        .build());*/
         kafkaEventPublisher.publish(
                 KafkaTopics.EMAIL_NOTIFICATION_TOPIC,
-                EmailNotificationEvent
-                        .builder()
+                EmailNotificationEvent.builder()
                         .to(user.getEmail())
                         .subject("Password Changed Successfully")
                         .body("Your password has been updated successfully.")
                         .build()
         );
-        /*auditService.audit(
-                user.getId(),
-                user.getUsername(),
-                "PASSWORD_RESET_COMPLETED",
-                IpUtil.getClientIp(servletRequest),
-                true,
-                "Password changed successfully");*/
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
-                AuditEvent.builder()
-                        .userId(user.getId())
-                        .username(user.getUsername())
-                        .role(user.getRoles().stream().findFirst().map(Role::getRoleName).orElse("ROLE_CUSTOMER"))
-                        .module("USER")
-                        .action("PASSWORD_RESET")
-                        .entityId(user.getId())
-                        .entityType("USER")
-                        .ipAddress(IpUtil.getClientIp(servletRequest))
-                        .description("Password changed successfully")
-                        .createdAt(LocalDateTime.now())
-                        .build()
-                );
+
+        publishAudit(
+                user,
+                "USER",
+                "PASSWORD_RESET",
+                "Password changed successfully",
+                servletRequest
+        );
 
         return "Password reset successful";
     }
 
-    private void validatePasswordHistory(
-            User user,
-            String newPassword) {
+    public AuthResponse refreshToken(
+            String refreshTokenValue,
+            HttpServletRequest servletRequest) {
 
-        List<PasswordHistory> histories =
-                passwordHistoryRepository
-                        .findTop3ByUserIdOrderByCreatedAtDesc(
-                                user.getId());
+        RefreshToken oldToken = refreshTokenService
+                .verifyToken(refreshTokenValue);
 
-        boolean reused =
-                histories.stream()
-                        .anyMatch(history ->
-                                passwordEncoder.matches(
-                                        newPassword,
-                                        history.getPasswordHash()));
+        User user = oldToken.getUser();
 
-        if (reused) {
-            throw new PasswordReuseException(
-                    "You cannot reuse any of your last 3 passwords.");
-        }
-    }
-
-
-
-    private void increaseFailedAttempts(
-            User user,
-            HttpServletRequest request) {
-
-        int attempts =
-                user.getFailedAttempts() + 1;
-
-        user.setFailedAttempts(
-                attempts);
-
-        /*loginAuditService.saveAudit(
-                user.getId(),
-                user.getUsername(),
-                IpUtil.getClientIp(request),
-                false,
-                "INVALID_PASSWORD");*/
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
-                AuditEvent.builder()
-                        .userId(user.getId())
-                        .username(user.getUsername())
-                        .role(user.getRoles().stream().findFirst().map(Role::getRoleName).orElse("ROLE_CUSTOMER"))
-                        .module("AUTH")
-                        .action("INVALID_PASSWORD")
-                        .entityId(user.getId())
-                        .entityType("USER")
-                        .ipAddress(IpUtil.getClientIp(request))
-                        .description("Password Invalid!")
-                        .createdAt(LocalDateTime.now())
-                        .build()
-        );
-
-        if (attempts >= maxFailedAttempts) {
-
-            user.setAccountLocked(true);
-            user.setLockTime(
-                    LocalDateTime.now());
-
-            /*loginAuditService.saveAudit(
-                    user.getId(),
-                    user.getUsername(),
-                    IpUtil.getClientIp(request),
-                    false,
-                    "ACCOUNT_LOCKED");*/
-            kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
-                    AuditEvent.builder()
-                            .userId(user.getId())
-                            .username(user.getUsername())
-                            .role(user.getRoles().stream().findFirst().map(Role::getRoleName).orElse("ROLE_CUSTOMER"))
-                            .module("AUTH")
-                            .action("ACCOUNT_BLOCKED")
-                            .entityId(user.getId())
-                            .entityType("USER")
-                            .ipAddress(IpUtil.getClientIp(request))
-                            .description("Account Blocked!")
-                            .createdAt(LocalDateTime.now())
-                            .build()
+        if (isInternalServiceAccount(user)) {
+            throw new InvalidRefreshTokenException(
+                    "Internal service accounts cannot use refresh tokens"
             );
         }
 
-        userRepository.save(user);
-    }
+        refreshTokenService.revokeToken(oldToken.getToken());
 
-    private void resetFailedAttempts(User user) {
-        user.setFailedAttempts(0);
-        userRepository.save(user);
-    }
-    private void checkLockStatus(User user,HttpServletRequest request) {
-        if (!Boolean.TRUE.equals(user.getAccountLocked())) {
-            return;
-        }
+        RefreshToken newToken = refreshTokenService
+                .createRefreshToken(user);
 
-        LocalDateTime unlockTime =
-                user.getLockTime()
-                        .plusMinutes(lockDuration);
+        String accessToken = jwtService.generateAccessToken(user);
 
-        if (LocalDateTime.now().isAfter(unlockTime)) {
-            user.setAccountLocked(false);
-            user.setFailedAttempts(0);
-            user.setLockTime(null);
-            userRepository.save(user);
-            return;
-        }
-
-       /* loginAuditService.saveAudit(
-                user.getId(),
-                user.getUsername(),
-                IpUtil.getClientIp(request),false,"ACCOUNT_LOCKED");*/
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
-                AuditEvent.builder()
-                        .userId(user.getId())
-                        .username(user.getUsername())
-                        .role(user.getRoles().stream().findFirst().map(Role::getRoleName).orElse("ROLE_CUSTOMER"))
-                        .module("AUTH")
-                        .action("ACCOUNT_BLOCKED")
-                        .entityId(user.getId())
-                        .entityType("USER")
-                        .ipAddress(IpUtil.getClientIp(request))
-                        .description("Account Blocked!")
-                        .createdAt(LocalDateTime.now())
-                        .build()
-        );
-        throw new AccountLockedException("Account locked. Try again later.");
-    }
-
-    public AuthResponse refreshToken(String refreshTokenValue,HttpServletRequest servletRequest) {
-        RefreshToken oldToken =
-                refreshTokenService
-                        .verifyToken(refreshTokenValue);
-
-        User user = oldToken.getUser();
-        refreshTokenService
-                .revokeToken(oldToken.getToken());
-
-        RefreshToken newToken =
-                refreshTokenService
-                        .createRefreshToken(user);
-
-        String accessToken =
-                jwtService.generateToken(user);
-
-        /*auditService.audit(
-                user.getId(),
-                user.getUsername(),
+        publishAudit(
+                user,
+                "AUTH",
                 "REFRESH_TOKEN_USED",
-                IpUtil.getClientIp(servletRequest),
-                true,
-                "Access token refreshed successfully");*/
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
-                AuditEvent.builder()
-                        .userId(user.getId())
-                        .username(user.getUsername())
-                        .role(user.getRoles().stream().findFirst().map(Role::getRoleName).orElse("ROLE_CUSTOMER"))
-                        .module("AUTH")
-                        .action("REFRESH_TOKEN_USED")
-                        .entityId(user.getId())
-                        .entityType("USER")
-                        .ipAddress(IpUtil.getClientIp(servletRequest))
-                        .description("Access token refreshed successfully")
-                        .createdAt(LocalDateTime.now())
-                        .build()
+                "Access token refreshed successfully",
+                servletRequest
         );
 
         return AuthResponse.builder()
@@ -545,37 +340,167 @@ public class LoginService {
     }
 
     @Transactional
-    public String logout(LogoutRequest request,HttpServletRequest httpRequest) {
+    public String logout(
+            LogoutRequest request,
+            HttpServletRequest httpRequest) {
 
-        RefreshToken refreshToken =
-                refreshTokenService
-                        .findByToken(request.getRefreshToken())
-                        .orElseThrow(() ->
-                                new InvalidRefreshTokenException("Invalid refresh token"));
+        RefreshToken refreshToken = refreshTokenService
+                .findByToken(request.getRefreshToken())
+                .orElseThrow(() -> new InvalidRefreshTokenException(
+                        "Invalid refresh token"
+                ));
 
         User user = refreshToken.getUser();
+
+        if (isInternalServiceAccount(user)) {
+            throw new InvalidRefreshTokenException(
+                    "Internal service accounts cannot logout with refresh tokens"
+            );
+        }
+
         refreshTokenService.logout(request.getRefreshToken());
-        /*auditService.audit(
-                user.getId(),
-                user.getUsername(),
+
+        publishAudit(
+                user,
+                "AUTH",
                 "LOGOUT",
-                IpUtil.getClientIp(httpRequest),
-                true,
-                "User logged out successfully");*/
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
+                "User logged out successfully",
+                httpRequest
+        );
+
+        return "Logout successful";
+    }
+
+    private void validatePasswordHistory(
+            User user,
+            String newPassword) {
+
+        List<PasswordHistory> histories = passwordHistoryRepository
+                .findTop3ByUserIdOrderByCreatedAtDesc(user.getId());
+
+        boolean reused = histories.stream()
+                .anyMatch(history -> passwordEncoder.matches(
+                        newPassword,
+                        history.getPasswordHash()
+                ));
+
+        if (reused) {
+            throw new PasswordReuseException(
+                    "You cannot reuse any of your last 3 passwords."
+            );
+        }
+    }
+
+    private void increaseFailedAttempts(
+            User user,
+            HttpServletRequest request) {
+
+        int attempts = user.getFailedAttempts() + 1;
+        user.setFailedAttempts(attempts);
+
+        publishAudit(
+                user,
+                "AUTH",
+                "INVALID_PASSWORD",
+                "Password invalid",
+                request
+        );
+
+        if (attempts >= maxFailedAttempts) {
+            user.setAccountLocked(true);
+            user.setLockTime(LocalDateTime.now());
+
+            publishAudit(
+                    user,
+                    "AUTH",
+                    "ACCOUNT_BLOCKED",
+                    "Account blocked after too many failed login attempts",
+                    request
+            );
+        }
+
+        userRepository.save(user);
+    }
+
+    private void resetFailedAttempts(User user) {
+        user.setFailedAttempts(0);
+        userRepository.save(user);
+    }
+
+    private void checkLockStatus(
+            User user,
+            HttpServletRequest request) {
+
+        if (!Boolean.TRUE.equals(user.getAccountLocked())) {
+            return;
+        }
+
+        LocalDateTime lockTime = user.getLockTime();
+
+        if (lockTime == null) {
+            user.setAccountLocked(false);
+            user.setFailedAttempts(0);
+            userRepository.save(user);
+            return;
+        }
+
+        LocalDateTime unlockTime = lockTime.plusMinutes(lockDuration);
+
+        if (LocalDateTime.now().isAfter(unlockTime)) {
+            user.setAccountLocked(false);
+            user.setFailedAttempts(0);
+            user.setLockTime(null);
+            userRepository.save(user);
+            return;
+        }
+
+        publishAudit(
+                user,
+                "AUTH",
+                "ACCOUNT_BLOCKED",
+                "Account is currently locked",
+                request
+        );
+
+        throw new AccountLockedException(
+                "Account locked. Try again later."
+        );
+    }
+
+    private boolean isInternalServiceAccount(User user) {
+        return user.getRoles() != null
+                && user.getRoles()
+                .stream()
+                .anyMatch(role -> ROLE_INTERNAL_SERVICE.equals(
+                        role.getRoleName()
+                ));
+    }
+
+    private void publishAudit(
+            User user,
+            String module,
+            String action,
+            String description,
+            HttpServletRequest request) {
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.AUDIT_LOG_TOPIC,
                 AuditEvent.builder()
                         .userId(user.getId())
                         .username(user.getUsername())
-                        .role(user.getRoles().stream().findFirst().map(Role::getRoleName).orElse("ROLE_CUSTOMER"))
-                        .module("AUTH")
-                        .action("LOGOUT")
+                        .role(user.getRoles()
+                                .stream()
+                                .findFirst()
+                                .map(Role::getRoleName)
+                                .orElse("ROLE_CUSTOMER"))
+                        .module(module)
+                        .action(action)
                         .entityId(user.getId())
                         .entityType("USER")
-                        .ipAddress(IpUtil.getClientIp(httpRequest))
-                        .description("User logged out successfully")
+                        .ipAddress(IpUtil.getClientIp(request))
+                        .description(description)
                         .createdAt(LocalDateTime.now())
                         .build()
         );
-        return "Logout successful";
     }
 }

@@ -93,7 +93,16 @@ public class AccountController {
         byte[] pdf = pdfService.generateStatementPdf(accountNumber,fromDate,toDate);
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)
-                .header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=statement.pdf")
+                .header(
+                        HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=statement-"
+                                + accountNumber
+                                + "-"
+                                + fromDate
+                                + "-to-"
+                                + toDate
+                                + ".pdf"
+                )
                 .body(pdf);
     }
 
