@@ -33,7 +33,7 @@ import java.util.UUID;
 public class TransactionServiceImpl implements TransactionService {
 
     private final TransactionRepository repository;
-    private final AccountClient accountClient;
+    private final AccountMoneyClient accountClient;
     private final TransactionReferenceClient transactionReferenceClient;
     private final NotificationClient notificationClient;
     private final KafkaEventPublisher kafkaEventPublisher;

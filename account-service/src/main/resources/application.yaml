@@ -37,6 +37,8 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+jwt:
+  secret: F7wez7S50RGr2wIvJ03oUPDOzvxmsEQZROunPOg/Jiem3q8sOIAUtsYaM41yzcIMCxkG8yag874v3Ae1foB4/A==
 
 eureka:
   client:
@@ -75,6 +77,7 @@ info:
     name: Account Service
     version: 1.0.0
     description: Account Management Service
+
 
 resilience4j:
   circuitbreaker:

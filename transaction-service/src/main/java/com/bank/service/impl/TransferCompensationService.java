@@ -1,6 +1,6 @@
 package com.bank.service.impl;
 
-import com.bank.client.AccountClient;
+import com.bank.client.AccountMoneyClient;
 import com.bank.common.events.AuditEvent;
 import com.bank.common.events.NotificationEvent;
 import com.bank.common.topics.KafkaTopics;
@@ -22,7 +22,7 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 public class TransferCompensationService {
 
-    private final AccountClient accountClient;
+    private final AccountMoneyClient accountClient;
     private final TransactionRepository transactionRepository;
     private final KafkaEventPublisher kafkaEventPublisher;
 

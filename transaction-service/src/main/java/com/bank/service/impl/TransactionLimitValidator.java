@@ -1,6 +1,7 @@
 package com.bank.service.impl;
 
-import com.bank.client.AccountClient;
+import com.bank.client.AccountMoneyClient;
+import com.bank.client.AccountQueryClient;
 import com.bank.dtos.TransactionLimitResponse;
 import com.bank.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
@@ -13,7 +14,7 @@ import java.time.LocalDate;
 @RequiredArgsConstructor
 public class TransactionLimitValidator {
 
-    private final AccountClient accountClient;
+    private final AccountQueryClient accountClient;
 
     private final TransactionRepository repository;
 

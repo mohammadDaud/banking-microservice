@@ -44,6 +44,13 @@ spring:
         spring.json.trusted.packages: "*"
         spring.json.use.type.headers: true
 
+internal:
+  auth:
+    client-id: transaction-service
+    client-secret: TaXqnpo65lef3wH1Iej0A7/J8WGco3FNMA9UP5KKfP9BnPmNQFDm9u4ZOb+sLyOjpVFeBiKhjetabbinWlZQYA==
+
+jwt:
+  secret: F7wez7S50RGr2wIvJ03oUPDOzvxmsEQZROunPOg/Jiem3q8sOIAUtsYaM41yzcIMCxkG8yag874v3Ae1foB4/A==
 
 
 eureka:
