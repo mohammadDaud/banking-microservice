@@ -1,5 +1,7 @@
 package com.bank.as.utill;
 
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 import java.security.SecureRandom;
@@ -66,5 +68,8 @@ public class JwtSecretGenerator {
 
         spec.clearPassword();
         scanner.close();
+
+        System.out.println("++++++++++++++ "+new BCryptPasswordEncoder().encode("TRANSACTION_SERVICE_CLIENT_SECRET_HASH")
+        );
     }
 }
