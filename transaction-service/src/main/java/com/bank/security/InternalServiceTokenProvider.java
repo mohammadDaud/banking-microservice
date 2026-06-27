@@ -1,6 +1,6 @@
 package com.bank.security;
 
-import com.bank.client.AuthServiceClient;
+import com.bank.client.AuthServiceTokenClient;
 import com.bank.dtos.InternalTokenRequest;
 import com.bank.dtos.InternalTokenResponse;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +16,7 @@ import java.util.concurrent.locks.ReentrantLock;
 @Slf4j
 public class InternalServiceTokenProvider {
 
-    private final AuthServiceClient authServiceClient;
+    private final AuthServiceTokenClient tokenClient;
 
     @Value("${internal.auth.client-id}")
     private String clientId;
@@ -62,7 +62,7 @@ public class InternalServiceTokenProvider {
             log.info("Fetching new internal service token from Auth Service.");
 
             InternalTokenResponse response =
-                    authServiceClient.generateInternalToken(
+                    tokenClient.generateInternalToken(
                             InternalTokenRequest.builder()
                                     .clientId(clientId)
                                     .clientSecret(clientSecret)

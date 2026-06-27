@@ -33,7 +33,7 @@ public class Transaction {
      */
     @Version
     @Column(nullable = false)
-    private Long version;
+    private long version = 0L;
 
     @Column(unique = true)
     private String transactionReference;

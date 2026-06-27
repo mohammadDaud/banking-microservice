@@ -9,6 +9,7 @@ import com.bank.enums.TransactionStatus;
 import com.bank.kafka.KafkaEventPublisher;
 import com.bank.model.Transaction;
 import com.bank.repository.TransactionRepository;
+import com.bank.security.InternalServiceTokenProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ public class TransferCompensationService {
     private final AccountMoneyClient accountClient;
     private final TransactionRepository transactionRepository;
     private final KafkaEventPublisher kafkaEventPublisher;
+    private final InternalServiceTokenProvider tokenProvider;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void compensateAfterCreditFailure(
@@ -50,7 +52,9 @@ public class TransferCompensationService {
             /*
              * Reverse source account debit.
              */
+            String token=tokenProvider.getAccessToken();
             accountClient.credit(
+                    "Bearer " + token,
                     transaction.getSourceAccount(),
                     reversalRequest
             );

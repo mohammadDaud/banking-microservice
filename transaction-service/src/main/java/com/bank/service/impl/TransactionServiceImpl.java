@@ -11,6 +11,7 @@ import com.bank.exception.RuleEngineUnavailableException;
 import com.bank.kafka.KafkaEventPublisher;
 import com.bank.model.Transaction;
 import com.bank.repository.TransactionRepository;
+import com.bank.security.InternalServiceTokenProvider;
 import com.bank.service.TransactionService;
 import feign.FeignException;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,7 @@ public class TransactionServiceImpl implements TransactionService {
     private final TransactionApprovalRecoveryService approvalRecoveryService;
     private final TransferCompensationService transferCompensationService;
     private final TransferExecutionService transferExecutionService;
+    private final InternalServiceTokenProvider tokenProvider;
 
     @Override
     @Transactional
@@ -702,13 +704,22 @@ public class TransactionServiceImpl implements TransactionService {
     private void debitAccount(String accountNumber, BigDecimal amount) {
         AmountRequest request = new AmountRequest();
         request.setAmount(amount);
-        accountClient.debit(accountNumber, request);
+        String token = tokenProvider.getAccessToken();
+        accountClient.debit(
+                "Bearer " + token,
+                accountNumber,
+                request
+        );
     }
 
     private void creditAccount(String accountNumber, BigDecimal amount) {
         AmountRequest request = new AmountRequest();
         request.setAmount(amount);
-        accountClient.credit(accountNumber, request);
+        String token = tokenProvider.getAccessToken();
+        accountClient.credit("Bearer " + token,
+                accountNumber,
+                request
+        );
     }
 
     private Transaction saveTransaction(

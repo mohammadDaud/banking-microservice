@@ -6,16 +6,37 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 
 @FeignClient(
         name = "account-service",
+        contextId = "accountMoneyClient",
         configuration = AccountFeignConfiguration.class
 )
 public interface AccountMoneyClient {
 
     @PutMapping("/api/accounts/{accountNumber}/credit")
-    void credit(@PathVariable String accountNumber, @RequestBody AmountRequest request);
+    void credit(
+            @RequestHeader("Authorization")
+            String authorization,
+
+            @PathVariable
+            String accountNumber,
+
+            @RequestBody
+            AmountRequest request
+    );
 
     @PutMapping("/api/accounts/{accountNumber}/debit")
-    void debit(@PathVariable String accountNumber, @RequestBody AmountRequest request);
+    void debit(
+            @RequestHeader("Authorization")
+            String authorization,
+
+            @PathVariable
+            String accountNumber,
+
+            @RequestBody
+            AmountRequest request
+    );
+
 }
