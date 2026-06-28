@@ -47,4 +47,24 @@ public interface AccountRepository extends JpaRepository<Account, String> {
             GROUP BY a.accountType
             """)
     List<Object[]> getAccountTypeStats();
+
+    long count();
+
+    long countByStatus(String status);
+
+    long countByAccountType(String accountType);
+
+    long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
+
+    @Query("""
+            SELECT COALESCE(SUM(a.balance),0)
+            FROM Account a
+            """)
+    BigDecimal getTotalBankBalance();
+
+    @Query("""
+            SELECT COALESCE(AVG(a.balance),0)
+            FROM Account a
+            """)
+    BigDecimal getAverageAccountBalance();
 }

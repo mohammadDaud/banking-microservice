@@ -28,4 +28,11 @@ public interface NotificationRepository extends JpaRepository<Notification,Strin
     void markAllRead(String userId);
 
     void deleteByCreatedAtBefore(LocalDateTime date);
+
+    boolean existsByEventId(String eventId);
+
+    /*===============DASHBOARD============*/
+    long count();
+    long countByReadFlag(Boolean readFlag);
+    long countByCreatedAtBetween(LocalDateTime start,LocalDateTime end);
 }

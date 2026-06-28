@@ -1,9 +1,6 @@
 package com.bank.service;
 
-import com.bank.dtos.CreateKycRequest;
-import com.bank.dtos.KycApprovalRequest;
-import com.bank.dtos.KycEligibilityResponse;
-import com.bank.dtos.KycResponse;
+import com.bank.dtos.*;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -65,4 +62,6 @@ public interface KycService {
     List<KycResponse> getKycByStatus(String status);
 
     List<KycResponse> getCheckerQueue();
+
+    KycDashboardResponse getDashboardStats();
 }

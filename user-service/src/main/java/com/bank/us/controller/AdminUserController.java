@@ -1,5 +1,6 @@
 package com.bank.us.controller;
 
+import com.bank.us.dtos.DashboardStatsResponse;
 import com.bank.us.dtos.UserProfileResponse;
 import com.bank.us.dtos.UserResponse;
 import com.bank.us.model.UserProfile;
@@ -37,5 +38,10 @@ public class AdminUserController {
     @GetMapping("/recent")
     public List<UserResponse> recentUsers() {
         return service.findAllByOrderByCreatedAtDesc(PageRequest.of(0, 10));
+    }
+
+    @GetMapping("/dashboard/stats")
+    public DashboardStatsResponse dashboardStats() {
+        return service.getDashboardStats();
     }
 }

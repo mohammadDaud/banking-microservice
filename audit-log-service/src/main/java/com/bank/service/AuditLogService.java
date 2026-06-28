@@ -15,5 +15,5 @@ public interface AuditLogService {
 
     Page<AuditLogResponse> search(AuditLogSearchRequest request);
 
-    AuditDashboardResponse dashboard();
+    AuditDashboardResponse getDashboardStats();
 }

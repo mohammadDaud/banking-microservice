@@ -1,5 +1,6 @@
 package com.bank.controller;
 
+import com.bank.dtos.BeneficiaryDashboardResponse;
 import com.bank.dtos.BeneficiaryResponse;
 import com.bank.dtos.CheckerActionRequest;
 import com.bank.service.BeneficiaryService;
@@ -42,6 +43,11 @@ public class AdminBeneficiaryController {
     public Long count(@RequestHeader("X-Roles") String roles) {
         validateCheckerRole(roles);
         return service.count();
+    }
+
+    @GetMapping("/dashboard/stats")
+    public BeneficiaryDashboardResponse dashboardStats() {
+        return service.getDashboardStats();
     }
 
     private void validateCheckerRole(String roles) {

@@ -1,10 +1,12 @@
 package com.bank.nfs.controller;
 
 import com.bank.common.events.EmailNotificationEvent;
+import com.bank.nfs.dtos.NotificationDashboardResponse;
 import com.bank.nfs.dtos.NotificationRequest;
 import com.bank.nfs.dtos.NotificationResponse;
 import com.bank.nfs.service.EmailService;
 import com.bank.nfs.service.NotificationService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -29,7 +31,7 @@ public class NotificationController {
     }
 
     @PostMapping
-    public NotificationResponse createNotification(@RequestBody NotificationRequest request) {
+    public NotificationResponse createNotification(@Valid @RequestBody NotificationRequest request){
         return service.createNotification(request);
     }
 
@@ -66,6 +68,11 @@ public class NotificationController {
     @GetMapping("/user/{userId}/page")
     public Page<NotificationResponse> getNotifications(@PathVariable String userId,Pageable pageable) {
         return service.getNotifications(userId,pageable);
+    }
+
+    @GetMapping("/dashboard/stats")
+    public NotificationDashboardResponse dashboardStats() {
+        return service.getDashboardStats();
     }
 
 }

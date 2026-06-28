@@ -29,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -446,6 +447,31 @@ public class TransactionServiceImpl implements TransactionService {
                 .stream()
                 .map(this::map)
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public TransactionDashboardResponse getDashboardStats() {
+            LocalDate today = LocalDate.now();
+            LocalDateTime todayStart = today.atStartOfDay();
+            LocalDateTime todayEnd = today.atTime(LocalTime.MAX);
+            LocalDate firstDay = today.withDayOfMonth(1);
+            LocalDateTime monthStart = firstDay.atStartOfDay();
+            LocalDateTime monthEnd = todayEnd;
+            return TransactionDashboardResponse.builder()
+                    .totalTransactions(repository.count())
+                    .successfulTransactions(repository.countByStatus(TransactionStatus.SUCCESS))
+                    .failedTransactions(repository.countByStatus(TransactionStatus.FAILED))
+                    .pendingTransactions(repository.countByStatus(TransactionStatus.PENDING))
+                    .pendingApprovalTransactions(repository.countByApprovalStatus(TransactionStatus.PENDING))
+                    .autoApprovedTransactions(repository.countByApprovalStatus(TransactionStatus.AUTO_APPROVED))
+                    .todayTransactions(repository.countByCreatedAtBetween(todayStart,todayEnd))
+                    .todayTransferAmount(repository.getTodayTransferAmount(todayStart,todayEnd))
+                    .monthlyTransferAmount(repository.getMonthlyTransferAmount(monthStart,monthEnd))
+                    .averageTransactionAmount(repository.getAverageTransactionAmount())
+                    .highestTransactionAmount(repository.getHighestTransactionAmount())
+                    .lowestTransactionAmount(repository.getLowestTransactionAmount())
+                    .build();
     }
 
     private TransactionResponse createRuleRejectedTransaction(

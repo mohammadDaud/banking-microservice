@@ -6,5 +6,7 @@ public enum AccountStatus {
 
     FROZEN,
 
-    CLOSED
+    CLOSED,
+
+    INACTIVE
 }

@@ -15,9 +15,11 @@ public class NotificationCleanupScheduler {
 
     private final NotificationRepository repository;
 
-    @Scheduled(cron = "0 0 1 * * SUN")
+    //@Scheduled(cron = "0 0 1 * * SUN")
+    //@Transactional
     public void cleanup() {
-        repository.deleteByCreatedAtBefore(LocalDateTime.now().minusMonths(6));
-        log.info("Old notifications removed");
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(90);
+        repository.deleteByCreatedAtBefore(cutoff);
+        log.info("Deleted notifications older than {}",cutoff);
     }
 }

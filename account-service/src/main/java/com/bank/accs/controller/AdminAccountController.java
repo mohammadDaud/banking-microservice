@@ -1,6 +1,7 @@
 package com.bank.accs.controller;
 
 import com.bank.accs.dtos.AccountDashResponse;
+import com.bank.accs.dtos.AccountDashboardResponse;
 import com.bank.accs.dtos.AccountResponse;
 import com.bank.accs.dtos.AccountTypeStatResponse;
 import com.bank.accs.service.AccountService;
@@ -75,5 +76,10 @@ public class AdminAccountController {
                         .createdAt(account.getCreatedAt())
                         .build())
                 .toList();
+    }
+
+    @GetMapping("/dashboard/stats")
+    public AccountDashboardResponse dashboardStats() {
+        return service.getDashboardStats();
     }
 }

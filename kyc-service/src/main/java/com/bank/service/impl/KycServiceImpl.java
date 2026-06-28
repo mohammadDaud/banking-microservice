@@ -8,10 +8,7 @@ import com.bank.common.events.NotificationEvent;
 import com.bank.common.topics.KafkaTopics;
 import com.bank.common.util.CorrelationIdUtil;
 import com.bank.common.util.EventMetadataUtil;
-import com.bank.dtos.EventMetadata;
-import com.bank.dtos.KycEligibilityResponse;
-import com.bank.dtos.KycResponse;
-import com.bank.dtos.NotificationRequest;
+import com.bank.dtos.*;
 import com.bank.enums.KycStatus;
 import com.bank.exception.KycAlreadyExistsException;
 import com.bank.exception.KycNotFoundException;
@@ -28,7 +25,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -411,6 +410,24 @@ public class KycServiceImpl implements KycService {
                 .stream()
                 .map(this::map)
                 .toList();
+    }
+
+    @Override
+    public KycDashboardResponse getDashboardStats() {
+        LocalDate today = LocalDate.now();
+        LocalDateTime start = today.atStartOfDay();
+        LocalDateTime end = today.atTime(LocalTime.MAX);
+        long total = repository.count();
+        long approved = repository.countByStatus(KycStatus.APPROVED);
+        return KycDashboardResponse.builder()
+                .totalKyc(total)
+                .pendingKyc(repository.countByStatus(KycStatus.PENDING))
+                .underReviewKyc(repository.countByStatus(KycStatus.UNDER_REVIEW))
+                .approvedKyc(approved)
+                .rejectedKyc(repository.countByStatus(KycStatus.REJECTED))
+                .submittedToday(repository.countByCreatedAtBetween(start,end))
+                .approvalRate(total == 0 ? 0 : ((double) approved / total) * 100)
+                .build();
     }
 
     private KycProfile getProfile(String userId) {

@@ -10,6 +10,7 @@ import com.bank.accs.kafka.KafkaEventPublisher;
 import com.bank.accs.model.Account;
 import com.bank.accs.model.TransactionLimit;
 import com.bank.accs.model.enums.AccountStatus;
+import com.bank.accs.model.enums.AccountType;
 import com.bank.accs.repository.AccountRepository;
 import com.bank.accs.repository.TransactionLimitRepository;
 import com.bank.accs.util.IpUtil;
@@ -31,6 +32,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -354,6 +356,22 @@ public class AccountService {
                 .availableBalance(account.getAvailableBalance())
                 .ledgerBalance(account.getLedgerBalance())
                 .transactions(statements)
+                .build();
+    }
+
+    public AccountDashboardResponse getDashboardStats() {
+        LocalDate today = LocalDate.now();
+        LocalDateTime start = today.atStartOfDay();
+        LocalDateTime end = today.atTime(LocalTime.MAX);
+        return AccountDashboardResponse.builder()
+                .totalAccounts(repository.count())
+                .activeAccounts(repository.countByStatus(AccountStatus.ACTIVE.name()))
+                .inactiveAccounts(repository.countByStatus(AccountStatus.INACTIVE.name()))
+                .savingsAccounts(repository.countByAccountType(AccountType.SAVINGS.name()))
+                .currentAccounts(repository.countByAccountType(AccountType.CURRENT.name()))
+                .totalBankBalance(repository.getTotalBankBalance())
+                .averageAccountBalance(repository.getAverageAccountBalance())
+                .accountsCreatedToday(repository.countByCreatedAtBetween(start,end))
                 .build();
     }
 

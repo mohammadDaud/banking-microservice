@@ -45,4 +45,6 @@ public interface TransactionService {
     List<TransactionResponse> getPendingApprovalTransactions();
 
     List<TransactionResponse> getReversalRequiredTransactions();
+
+    TransactionDashboardResponse getDashboardStats();
 }

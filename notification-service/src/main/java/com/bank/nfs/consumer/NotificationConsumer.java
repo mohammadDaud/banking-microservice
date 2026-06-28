@@ -23,18 +23,36 @@ public class NotificationConsumer {
     @KafkaListener(topics = KafkaTopics.NOTIFICATION_TOPIC,groupId ="notification-group")
     public void consume(NotificationEvent event) {
 
+        log.info("Received Notification Event : eventId={}, correlationId={}",
+                event.getEventId(),
+                event.getCorrelationId()
+        );
+
         Notification notification =
                 Notification.builder()
                         .id(UUID.randomUUID().toString())
+                        .eventId(event.getEventId())
+                        .correlationId(event.getCorrelationId())
+                        .requestId(event.getRequestId())
+                        .serviceName(event.getServiceName())
+                        .status(event.getStatus())
                         .userId(event.getUserId())
                         .title(event.getTitle())
                         .message(event.getMessage())
                         .type(NotificationType.valueOf(event.getType()))
                         .priority(NotificationPriority.valueOf(event.getPriority()))
                         .readFlag(false)
-                        .createdAt(LocalDateTime.now())
+                        .createdAt(
+                                event.getCreatedAt() != null
+                                        ? event.getCreatedAt()
+                                        : LocalDateTime.now())
+
                         .build();
 
+        if (repository.existsByEventId(event.getEventId())) {
+            log.info("Notification already processed : {}",event.getEventId());
+            return;
+        }
         repository.save(notification);
     }
 }

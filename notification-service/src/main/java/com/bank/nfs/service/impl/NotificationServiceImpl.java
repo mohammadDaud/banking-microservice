@@ -1,5 +1,6 @@
 package com.bank.nfs.service.impl;
 
+import com.bank.nfs.dtos.NotificationDashboardResponse;
 import com.bank.nfs.dtos.NotificationRequest;
 import com.bank.nfs.dtos.NotificationResponse;
 import com.bank.nfs.enums.NotificationPriority;
@@ -9,14 +10,19 @@ import com.bank.nfs.model.Notification;
 import com.bank.nfs.repository.NotificationRepository;
 import com.bank.nfs.service.NotificationService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class NotificationServiceImpl implements NotificationService {
@@ -25,6 +31,8 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public NotificationResponse createNotification(NotificationRequest request) {
+        log.info("Creating notification for user={}",request.getUserId());
+        LocalDateTime now = LocalDateTime.now();
         Notification notification =
                 Notification.builder()
                         .id(UUID.randomUUID().toString())
@@ -34,9 +42,10 @@ public class NotificationServiceImpl implements NotificationService {
                         .type(request.getType()==null?NotificationType.KYC:request.getType())
                         .priority(request.getPriority()==null?NotificationPriority.LOW:request.getPriority())
                         .readFlag(false)
-                        .createdAt(LocalDateTime.now())
+                        .createdAt(now)
                         .build();
         repository.save(notification);
+        log.info("Notification created : {}",notification.getId());
         return map(notification);
     }
 
@@ -95,6 +104,23 @@ public class NotificationServiceImpl implements NotificationService {
     public Page<NotificationResponse> getNotifications(String userId, Pageable pageable) {
        return repository.findByUserIdOrderByCreatedAtDesc(userId,pageable)
                     .map(this::map);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public NotificationDashboardResponse getDashboardStats() {
+        LocalDate today = LocalDate.now();
+        LocalDateTime start = today.atStartOfDay();
+        LocalDateTime end = today.atTime(LocalTime.MAX);
+        long total = repository.count();
+        long unread = repository.countByReadFlag(false);
+        return NotificationDashboardResponse.builder()
+                .totalNotifications(total)
+                .unreadNotifications(unread)
+                .readNotifications(total - unread)
+                .notificationsToday(repository.countByCreatedAtBetween(start,end))
+                .build();
+
     }
 
     private NotificationResponse map(Notification notification) {

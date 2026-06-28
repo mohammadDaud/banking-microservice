@@ -1,6 +1,7 @@
 package com.bank.controller;
 
 import com.bank.dtos.KycApprovalRequest;
+import com.bank.dtos.KycDashboardResponse;
 import com.bank.dtos.KycResponse;
 import com.bank.dtos.KycStatResponse;
 import com.bank.service.KycService;
@@ -99,6 +100,11 @@ public class AdminKycController {
                         .count(((Number) recod[1]).longValue())
                         .build())
                 .toList();
+    }
+
+    @GetMapping("/dashboard/stats")
+    public KycDashboardResponse dashboardStats() {
+        return service.getDashboardStats();
     }
 
     private void validateCheckerRole(String roles) {

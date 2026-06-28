@@ -5,6 +5,7 @@ import com.bank.model.KycProfile;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,4 +29,8 @@ public interface KycRepository extends JpaRepository<KycProfile,String> {
     Long countByKycStatus(String status);
 
     List<KycProfile> findByKycStatusIn(List<KycStatus> statuses);
+
+    long count();
+    long countByStatus(KycStatus status);
+    long countByCreatedAtBetween(LocalDateTime start,LocalDateTime end);
 }

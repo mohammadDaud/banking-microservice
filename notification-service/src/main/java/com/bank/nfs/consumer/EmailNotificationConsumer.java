@@ -20,11 +20,6 @@ public class EmailNotificationConsumer {
     public void consume(EmailNotificationEvent event) {
         log.info("Received Email Event : {}",event);
         try {
-            /*EmailNotificationEvent event =
-                    objectMapper.readValue(
-                            message,
-                            EmailNotificationEvent.class);*/
-
             emailService.sendEmail(
                     EmailNotificationEvent.builder()
                             .to(event.getTo())
@@ -32,8 +27,8 @@ public class EmailNotificationConsumer {
                             .body(event.getBody())
                             .build()
             );
-        } catch (Exception e) {
-            log.error("Failed to process email event: {}", e.getMessage());
+        } catch (Exception ex) {
+            log.error("Failed processing email event",ex);
         }
     }
 }

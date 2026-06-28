@@ -1,13 +1,11 @@
 package com.bank.controller;
 
-import com.bank.dtos.CheckerActionRequest;
-import com.bank.dtos.MonthlyTransactionResponse;
-import com.bank.dtos.TransactionDashResponse;
-import com.bank.dtos.TransactionResponse;
+import com.bank.dtos.*;
 import com.bank.service.TransactionService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Arrays;
@@ -108,6 +106,12 @@ public class AdminTransactionController {
     public List<TransactionResponse> getReversalRequiredTransactions() {
         return service.getReversalRequiredTransactions();
     }
+
+    @GetMapping("/dashboard/stats")
+    public ResponseEntity<TransactionDashboardResponse> getDashboardStats() {
+        return ResponseEntity.ok(service.getDashboardStats());
+    }
+
 
     private void validateCheckerRole(String roles) {
         if (roles == null) {

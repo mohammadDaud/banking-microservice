@@ -15,9 +15,11 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -100,52 +102,23 @@ public class AuditLogServiceImpl implements AuditLogService {
     }
 
     @Override
-    public AuditDashboardResponse dashboard() {
+    @Transactional(readOnly = true)
+    public AuditDashboardResponse getDashboardStats() {
 
         LocalDate today = LocalDate.now();
-
         LocalDateTime start = today.atStartOfDay();
-        LocalDateTime end = today.plusDays(1).atStartOfDay();
-
+        LocalDateTime end = today.atTime(LocalTime.MAX);
         return AuditDashboardResponse.builder()
-                .totalLogs(repository.count())
-
-                .todayLogins(
-                        repository.countByActionAndCreatedAtBetween(
-                                AuditAction.LOGIN_SUCCESS,
-                                start,
-                                end))
-
-                .todayTransfers(
-                        repository.countByActionAndCreatedAtBetween(
-                                AuditAction.TRANSFER_SUCCESS,
-                                start,
-                                end))
-
-                .todayFailedTransfers(
-                        repository.countByActionAndCreatedAtBetween(
-                                AuditAction.TRANSFER_FAILED,
-                                start,
-                                end))
-
-                .todayAccountsCreated(
-                        repository.countByActionAndCreatedAtBetween(
-                                AuditAction.ACCOUNT_CREATED,
-                                start,
-                                end))
-
-                .todayBeneficiariesAdded(
-                        repository.countByActionAndCreatedAtBetween(
-                                AuditAction.BENEFICIARY_ADDED,
-                                start,
-                                end))
-
-                .todayKycApproved(
-                        repository.countByActionAndCreatedAtBetween(
-                                AuditAction.KYC_APPROVED,
-                                start,
-                                end))
-
+                .totalAuditLogs(repository.count())
+                .todayAuditLogs(repository.countByCreatedAtBetween(start,end))
+                .loginSuccess(repository.countByModuleAndAction("AUTH","LOGIN_SUCCESS"))
+                .loginFailed(repository.countByModuleAndAction("AUTH","LOGIN_FAILED"))
+                .userRegistrations(repository.countByModuleAndAction("AUTH","REGISTERED_SUCCESS"))
+                .accountsCreated(repository.countByModuleAndAction("ACCOUNT","ACCOUNT_CREATED"))
+                .kycApproved(repository.countByModuleAndAction("KYC","KYC_APPROVED"))
+                .beneficiaryApproved(repository.countByModuleAndAction("BENEFICIARY","BENEFICIARY_APPROVED"))
+                .successfulTransactions(repository.countByModuleAndAction("TRANSACTION","TRANSFER_SUCCESS"))
+                .failedTransactions(repository.countByModuleAndAction("TRANSACTION","TRANSFER_FAILED"))
                 .build();
     }
 }

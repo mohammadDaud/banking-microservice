@@ -1,5 +1,6 @@
 package com.bank.nfs.model;
 
+import com.bank.common.enums.EventStatus;
 import com.bank.nfs.enums.NotificationPriority;
 import com.bank.nfs.enums.NotificationType;
 import jakarta.persistence.*;
@@ -20,6 +21,17 @@ public class Notification {
 
     @Id
     private String id;
+
+    private String eventId;
+
+    private String correlationId;
+
+    private String requestId;
+
+    private String serviceName;
+
+    @Enumerated(EnumType.STRING)
+    private EventStatus status;
 
     private String userId;
 

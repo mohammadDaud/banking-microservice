@@ -22,7 +22,9 @@ import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -268,6 +270,20 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
                 .message(eligible
                         ? "Beneficiary is eligible for transaction"
                         : "Beneficiary must be approved before transaction")
+                .build();
+    }
+
+    @Override
+    public BeneficiaryDashboardResponse getDashboardStats() {
+        LocalDate today = LocalDate.now();
+        LocalDateTime start = today.atStartOfDay();
+        LocalDateTime end = today.atTime(LocalTime.MAX);
+        return BeneficiaryDashboardResponse.builder()
+                .totalBeneficiaries(repository.count())
+                .pendingBeneficiaries(repository.countByStatus(BeneficiaryStatus.PENDING))
+                .approvedBeneficiaries(repository.countByStatus(BeneficiaryStatus.APPROVED))
+                .rejectedBeneficiaries(repository.countByStatus(BeneficiaryStatus.REJECTED))
+                .addedToday(repository.countByCreatedAtBetween(start,end))
                 .build();
     }
 

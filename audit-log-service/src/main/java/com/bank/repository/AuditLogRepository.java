@@ -7,7 +7,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import java.time.LocalDateTime;
 
 public interface AuditLogRepository extends
-        JpaRepository<AuditLog,String>,
+        JpaRepository<AuditLog, String>,
         JpaSpecificationExecutor<AuditLog> {
 
     long countByAction(com.bank.enums.AuditAction action);
@@ -18,8 +18,10 @@ public interface AuditLogRepository extends
             LocalDateTime end
     );
 
-    long countByCreatedAtBetween(
-            LocalDateTime start,
-            LocalDateTime end
-    );
+    /*=================DASHBOARD=========================*/
+    long count();
+
+    long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
+
+    long countByModuleAndAction(String module,String action);
 }

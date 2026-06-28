@@ -11,17 +11,24 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class AuditDashboardResponse {
 
-    private long totalLogs;
+    private long totalAuditLogs;
 
-    private long todayLogins;
+    private long todayAuditLogs;
 
-    private long todayTransfers;
+    private long loginSuccess;
 
-    private long todayFailedTransfers;
+    private long loginFailed;
 
-    private long todayAccountsCreated;
+    private long userRegistrations;
 
-    private long todayBeneficiariesAdded;
+    private long accountsCreated;
 
-    private long todayKycApproved;
+    private long kycApproved;
+
+    private long beneficiaryApproved;
+
+    private long successfulTransactions;
+
+    private long failedTransactions;
+
 }

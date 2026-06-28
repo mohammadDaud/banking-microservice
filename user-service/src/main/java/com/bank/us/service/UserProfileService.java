@@ -7,10 +7,7 @@ import com.bank.common.events.NotificationEvent;
 import com.bank.common.topics.KafkaTopics;
 import com.bank.common.util.CorrelationIdUtil;
 import com.bank.common.util.EventMetadataUtil;
-import com.bank.us.dtos.EventMetadata;
-import com.bank.us.dtos.UserProfileRequest;
-import com.bank.us.dtos.UserProfileResponse;
-import com.bank.us.dtos.UserResponse;
+import com.bank.us.dtos.*;
 import com.bank.us.enums.UserStatus;
 import com.bank.us.kafka.KafkaEventPublisher;
 import com.bank.us.model.UserProfile;
@@ -23,7 +20,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.Collection;
 import java.util.List;
 
@@ -68,6 +67,19 @@ public class UserProfileService {
 
     public Long countByStatus(String active) {
         return repository.countByStatus(active);
+    }
+
+    public DashboardStatsResponse getDashboardStats(){
+        LocalDate today = LocalDate.now();
+        LocalDateTime start = today.atStartOfDay();
+        LocalDateTime end = today.atTime(LocalTime.MAX);
+        return DashboardStatsResponse
+                .builder()
+                .totalCustomers(repository.count())
+                .activeCustomers(repository.countByStatus(UserStatus.ACTIVE.name()))
+                .inactiveCustomers(repository.countByStatus(UserStatus.INACTIVE.name()))
+                .registeredToday(repository.countByCreatedAtBetween(start,end))
+                .build();
     }
 
     public List<UserResponse> findAllByOrderByCreatedAtDesc(PageRequest of) {

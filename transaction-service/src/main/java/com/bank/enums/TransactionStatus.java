@@ -14,5 +14,7 @@ public enum TransactionStatus {
 
     PROCESSING_APPROVAL,
 
-    REJECTED
+    REJECTED,
+
+    AUTO_APPROVED
 }

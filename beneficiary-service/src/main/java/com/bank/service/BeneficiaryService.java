@@ -1,5 +1,6 @@
 package com.bank.service;
 
+import com.bank.dtos.BeneficiaryDashboardResponse;
 import com.bank.dtos.BeneficiaryEligibilityResponse;
 import com.bank.dtos.BeneficiaryResponse;
 import com.bank.dtos.CreateBeneficiaryRequest;
@@ -25,4 +26,6 @@ public interface BeneficiaryService {
     Long count();
 
     BeneficiaryEligibilityResponse checkEligibility(String beneficiaryId, String customerId);
+
+    BeneficiaryDashboardResponse getDashboardStats();
 }

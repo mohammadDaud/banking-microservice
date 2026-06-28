@@ -1,5 +1,6 @@
 package com.bank.nfs.service;
 
+import com.bank.nfs.dtos.NotificationDashboardResponse;
 import com.bank.nfs.dtos.NotificationRequest;
 import com.bank.nfs.dtos.NotificationResponse;
 import org.springframework.data.domain.Page;
@@ -16,4 +17,6 @@ public interface NotificationService {
     List<NotificationResponse> getRecentNotifications(String userId);
     void markAllRead(String userId);
     Page<NotificationResponse> getNotifications(String userId,Pageable pageable);
+
+    NotificationDashboardResponse getDashboardStats();
 }

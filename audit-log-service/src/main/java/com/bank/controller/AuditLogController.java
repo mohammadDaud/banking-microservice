@@ -43,9 +43,9 @@ public class AuditLogController {
         return service.search(request);
     }
 
-    @GetMapping("/dashboard")
-    public AuditDashboardResponse dashboard() {
-        return service.dashboard();
+    @GetMapping("/dashboard/stats")
+    public ResponseEntity<AuditDashboardResponse> getDashboardStats() {
+        return ResponseEntity.ok(service.getDashboardStats());
     }
 
     @GetMapping("/export/csv")
