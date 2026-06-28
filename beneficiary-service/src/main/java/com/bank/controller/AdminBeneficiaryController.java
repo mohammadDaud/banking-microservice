@@ -3,6 +3,7 @@ package com.bank.controller;
 import com.bank.dtos.BeneficiaryResponse;
 import com.bank.dtos.CheckerActionRequest;
 import com.bank.service.BeneficiaryService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,18 +24,18 @@ public class AdminBeneficiaryController {
     }
 
     @PutMapping("/{id}/approve")
-    public BeneficiaryResponse approve(@PathVariable String id, @RequestHeader("X-User-Id") String checkerId, @RequestHeader("X-Roles") String roles, @RequestBody CheckerActionRequest request) {
+    public BeneficiaryResponse approve(@PathVariable String id, @RequestHeader("X-User-Id") String checkerId, @RequestHeader("X-Roles") String roles, @RequestBody CheckerActionRequest request, HttpServletRequest httpServletRequest) {
         validateCheckerRole(roles);
-        return service.approveBeneficiary(id, checkerId, request.getRemarks());
+        return service.approveBeneficiary(id, checkerId, request.getRemarks(),httpServletRequest);
     }
 
     @PutMapping("/{id}/reject")
-    public BeneficiaryResponse reject(@PathVariable String id, @RequestHeader("X-User-Id") String checkerId, @RequestHeader("X-Roles") String roles, @RequestBody CheckerActionRequest request) {
+    public BeneficiaryResponse reject(@PathVariable String id, @RequestHeader("X-User-Id") String checkerId, @RequestHeader("X-Roles") String roles, @RequestBody CheckerActionRequest request, HttpServletRequest httpServletRequest) {
         validateCheckerRole(roles);
         if (request.getRemarks() == null || request.getRemarks().isBlank()) {
             throw new RuntimeException("Remarks are required when rejecting a beneficiary");
         }
-        return service.rejectBeneficiary(id, checkerId, request.getRemarks());
+        return service.rejectBeneficiary(id, checkerId, request.getRemarks(), httpServletRequest);
     }
 
     @GetMapping("/count")

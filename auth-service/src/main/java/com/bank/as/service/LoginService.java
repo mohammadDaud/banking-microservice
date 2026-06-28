@@ -9,9 +9,13 @@ import com.bank.as.repository.PasswordHistoryRepository;
 import com.bank.as.repository.PasswordResetTokenRepository;
 import com.bank.as.repository.UserRepository;
 import com.bank.as.utill.IpUtil;
+import com.bank.common.enums.EventSource;
+import com.bank.common.enums.EventStatus;
 import com.bank.common.events.AuditEvent;
 import com.bank.common.events.EmailNotificationEvent;
 import com.bank.common.topics.KafkaTopics;
+import com.bank.common.util.CorrelationIdUtil;
+import com.bank.common.util.EventMetadataUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -29,8 +33,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class LoginService {
 
-    private static final String ROLE_INTERNAL_SERVICE =
-            "ROLE_INTERNAL_SERVICE";
+    private static final String ROLE_INTERNAL_SERVICE = "ROLE_INTERNAL_SERVICE";
+    private static final String SERVICE_NAME = "auth-service";
 
     private final UserRepository userRepository;
     private final AuthenticationManager authenticationManager;
@@ -66,6 +70,7 @@ public class LoginService {
                             "USER_NOT_FOUND"
                     );
 
+
                     return new InvalidCredentialsException(
                             "Invalid username or password"
                     );
@@ -77,6 +82,13 @@ public class LoginService {
          * POST /api/auth/internal/token
          */
         if (isInternalServiceAccount(user)) {
+            publishAudit(
+                    user,
+                    "AUTH",
+                    "LOGIN_FAILED",
+                    "Invalid password",
+                    servletRequest
+            );
             throw new InvalidCredentialsException(
                     "Internal service accounts cannot use user login"
             );
@@ -93,7 +105,6 @@ public class LoginService {
             );
         } catch (Exception ex) {
             increaseFailedAttempts(user, servletRequest);
-
             throw new InvalidCredentialsException(
                     "Invalid username or password"
             );
@@ -109,23 +120,20 @@ public class LoginService {
 
         String otp = otpService.createOtp(user.getId());
 
-        kafkaEventPublisher.publish(
-                KafkaTopics.EMAIL_NOTIFICATION_TOPIC,
-                EmailNotificationEvent.builder()
-                        .to(user.getEmail())
-                        .subject("Your OTP Code")
-                        .body(
-                                "Your OTP code is: "
-                                        + otp
-                                        + "\n\nThis code expires in 5 minutes."
-                        )
-                        .build()
+        publishEmailEvent(
+                user,
+                "Your OTP Code",
+                "Your OTP code is: "
+                        + otp
+                        + "\n\nThis code expires in 5 minutes.",
+                "LOGIN_OTP",
+                EventStatus.PENDING
         );
 
         publishAudit(
                 user,
                 "AUTH",
-                "OTP_SUCCESS",
+                "LOGIN_OTP_SENT",
                 "OTP sent successfully",
                 servletRequest
         );
@@ -136,7 +144,7 @@ public class LoginService {
                 .build();
     }
 
-    public AuthResponse verifyOtp(VerifyOtpRequest request) {
+    public AuthResponse verifyOtp(VerifyOtpRequest request, HttpServletRequest servletRequest) {
 
         User user = userRepository
                 .findByUsername(request.getUsername())
@@ -157,10 +165,24 @@ public class LoginService {
                 ));
 
         if (otpEntity.getExpiryTime().isBefore(LocalDateTime.now())) {
+            publishAudit(
+                    user,
+                    "AUTH",
+                    "OTP_EXPIRED",
+                    "OTP expired",
+                    servletRequest
+            );
             throw new OtpNotVerifiedException("OTP expired");
         }
 
         if (!otpEntity.getOtp().equals(request.getOtp())) {
+            publishAudit(
+                    user,
+                    "AUTH",
+                    "OTP_VERIFICATION_FAILED",
+                    "Invalid OTP",
+                    servletRequest
+            );
             throw new OtpNotVerifiedException("Invalid OTP");
         }
 
@@ -177,6 +199,13 @@ public class LoginService {
                 .findFirst()
                 .map(Role::getRoleName)
                 .orElse("ROLE_CUSTOMER");
+        publishAudit(
+                user,
+                "AUTH",
+                "LOGIN_SUCCESS",
+                "User logged in successfully",
+                servletRequest
+        );
 
         return AuthResponse.builder()
                 .accessToken(accessToken)
@@ -187,7 +216,7 @@ public class LoginService {
                 .build();
     }
 
-    public String forgotPassword(ForgotPasswordRequest request) {
+    public String forgotPassword(ForgotPasswordRequest request,HttpServletRequest  servletRequest) {
 
         User user = userRepository
                 .findByEmail(request.getEmail())
@@ -217,19 +246,22 @@ public class LoginService {
                 "http://localhost:8081/api/auth/reset-password?token="
                         + token;
 
-        kafkaEventPublisher.publish(
-                KafkaTopics.EMAIL_NOTIFICATION_TOPIC,
-                EmailNotificationEvent.builder()
-                        .to(user.getEmail())
-                        .subject("Password Reset Request")
-                        .body(
-                                "Click below link to reset your password:\n\n"
-                                        + resetUrl
-                                        + "\n\nThis link expires in 15 minutes."
-                        )
-                        .build()
+        publishEmailEvent(
+                user,
+                "Password Reset Request",
+                "Click below link to reset your password:\n\n"
+                        + resetUrl
+                        + "\n\nThis link expires in 15 minutes.",
+                "PASSWORD_RESET",
+                EventStatus.PENDING
         );
-
+        publishAudit(
+                user,
+                "USER",
+                "PASSWORD_RESET_REQUEST",
+                "Password reset requested",
+                servletRequest
+        );
         return "Password reset link sent successfully";
     }
 
@@ -261,6 +293,7 @@ public class LoginService {
                 ));
 
         if (isInternalServiceAccount(user)) {
+
             throw new InvalidCredentialsException(
                     "Password reset is not allowed for internal service accounts"
             );
@@ -281,21 +314,20 @@ public class LoginService {
 
         resetToken.setUsed(true);
         passwordResetTokenRepository.save(resetToken);
-
-        kafkaEventPublisher.publish(
-                KafkaTopics.EMAIL_NOTIFICATION_TOPIC,
-                EmailNotificationEvent.builder()
-                        .to(user.getEmail())
-                        .subject("Password Changed Successfully")
-                        .body("Your password has been updated successfully.")
-                        .build()
+        publishEmailEvent(
+                user,
+                "Password Changed Successfully",
+                "Your password has been changed successfully.\n\n"
+                        + "If you did not perform this action, please contact support immediately.",
+                "PASSWORD_CHANGED",
+                EventStatus.SUCCESS
         );
 
         publishAudit(
                 user,
-                "USER",
-                "PASSWORD_RESET",
-                "Password changed successfully",
+                "AUTH",
+                "PASSWORD_RESET_SUCCESS",
+                "Password reset completed successfully",
                 servletRequest
         );
 
@@ -327,8 +359,8 @@ public class LoginService {
         publishAudit(
                 user,
                 "AUTH",
-                "REFRESH_TOKEN_USED",
-                "Access token refreshed successfully",
+                "TOKEN_REFRESH",
+                "Access token refreshed",
                 servletRequest
         );
 
@@ -364,7 +396,7 @@ public class LoginService {
                 user,
                 "AUTH",
                 "LOGOUT",
-                "User logged out successfully",
+                "User logged out",
                 httpRequest
         );
 
@@ -432,6 +464,13 @@ public class LoginService {
             HttpServletRequest request) {
 
         if (!Boolean.TRUE.equals(user.getAccountLocked())) {
+            publishAudit(
+                    user,
+                    "AUTH",
+                    "ACCOUNT_LOCKED",
+                    "Account is locked",
+                    request
+            );
             return;
         }
 
@@ -476,7 +515,7 @@ public class LoginService {
                 ));
     }
 
-    private void publishAudit(
+    /*private void publishAudit(
             User user,
             String module,
             String action,
@@ -500,6 +539,79 @@ public class LoginService {
                         .ipAddress(IpUtil.getClientIp(request))
                         .description(description)
                         .createdAt(LocalDateTime.now())
+                        .build()
+        );
+    }*/
+
+    private EventMetadata createEventMetadata() {
+
+        return EventMetadata.builder()
+                .correlationId(CorrelationIdUtil.getCorrelationId())
+                .requestId(EventMetadataUtil.requestId())
+                .createdAt(EventMetadataUtil.createdAt())
+                .build();
+    }
+
+    private void publishAudit(
+            User user,
+            String module,
+            String action,
+            String description,
+            HttpServletRequest request) {
+        EventMetadata metadata = createEventMetadata();
+        kafkaEventPublisher.publish(
+                KafkaTopics.AUDIT_LOG_TOPIC,
+                AuditEvent.builder()
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(metadata.getCorrelationId())
+                        .requestId(metadata.getRequestId())
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.AUTH_SERVICE)
+                        .requestUri(request != null
+                                ? request.getRequestURI()
+                                : null)
+                        .requestMethod(request.getMethod())
+                        .userId(user.getId())
+                        .username(user.getUsername())
+                        .role(user.getRoles()
+                                .stream()
+                                .findFirst()
+                                .map(Role::getRoleName)
+                                .orElse("ROLE_CUSTOMER"))
+                        .module(module)
+                        .action(action)
+                        .entityId(user.getId())
+                        .entityType("USER")
+                        .description(description)
+                        .status(EventStatus.SUCCESS)
+                        .ipAddress(IpUtil.getClientIp(request))
+                        .createdAt(metadata.getCreatedAt())
+                        .build()
+
+        );
+    }
+
+    private void publishEmailEvent(
+            User user,
+            String subject,
+            String body,
+            String template,
+            EventStatus status) {
+        EventMetadata metadata = createEventMetadata();
+        kafkaEventPublisher.publish(
+                KafkaTopics.EMAIL_NOTIFICATION_TOPIC,
+                EmailNotificationEvent.builder()
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(metadata.getCorrelationId())
+                        .requestId(metadata.getRequestId())
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.AUTH_SERVICE)
+                        .to(user.getEmail())
+                        .subject(subject)
+                        .body(body)
+                        .templateName(template)
+                        .status(status)
+                        .createdAt(metadata.getCreatedAt())
                         .build()
         );
     }

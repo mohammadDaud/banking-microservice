@@ -6,6 +6,7 @@ import com.bank.dtos.InternalTokenResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -61,13 +62,16 @@ public class InternalServiceTokenProvider {
 
             log.info("Fetching new internal service token from Auth Service.");
 
-            InternalTokenResponse response =
-                    tokenClient.generateInternalToken(
-                            InternalTokenRequest.builder()
-                                    .clientId(clientId)
-                                    .clientSecret(clientSecret)
-                                    .build()
-                    );
+           if(new BCryptPasswordEncoder().matches("TRANSACTION_SERVICE_CLIENT_SECRET_HASH",clientSecret)) {
+               clientSecret="TRANSACTION_SERVICE_CLIENT_SECRET_HASH";
+           }
+               InternalTokenResponse response =
+                       tokenClient.generateInternalToken(
+                               InternalTokenRequest.builder()
+                                       .clientId(clientId)
+                                       .clientSecret(clientSecret)
+                                       .build()
+                       );
 
             cachedToken = response.getAccessToken();
 

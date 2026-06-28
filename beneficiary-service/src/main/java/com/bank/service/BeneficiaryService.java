@@ -3,19 +3,20 @@ package com.bank.service;
 import com.bank.dtos.BeneficiaryEligibilityResponse;
 import com.bank.dtos.BeneficiaryResponse;
 import com.bank.dtos.CreateBeneficiaryRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import java.util.List;
 
 public interface BeneficiaryService {
-    BeneficiaryResponse createBeneficiary(CreateBeneficiaryRequest request, String makerId);
+    BeneficiaryResponse createBeneficiary(CreateBeneficiaryRequest request, String makerId,HttpServletRequest  httpServletRequest);
 
     List<BeneficiaryResponse> getCustomerBeneficiaries(String customerId);
 
-    BeneficiaryResponse approveBeneficiary(String beneficiaryId, String checkerId, String remarks);
+    BeneficiaryResponse approveBeneficiary(String beneficiaryId, String checkerId, String remarks,HttpServletRequest  httpServletRequest);
 
-    BeneficiaryResponse rejectBeneficiary(String beneficiaryId, String checkerId, String remarks);
+    BeneficiaryResponse rejectBeneficiary(String beneficiaryId, String checkerId, String remarks,HttpServletRequest  httpServletRequest);
 
-    void deleteBeneficiary(String beneficiaryId, String customerId);
+    void deleteBeneficiary(String beneficiaryId, String customerId, HttpServletRequest httpServletRequest);
 
     Long getBeneficiaryCount(String customerId);
 

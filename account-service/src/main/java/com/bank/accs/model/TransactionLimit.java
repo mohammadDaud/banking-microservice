@@ -1,5 +1,6 @@
 package com.bank.accs.model;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -26,10 +27,13 @@ public class TransactionLimit {
 
     private String accountNumber;
 
+    @Column(name = "per_transaction_limit")
     private BigDecimal perTransactionLimit;
 
+    @Column(name = "daily_limit")
     private BigDecimal dailyLimit;
 
+    @Column(name = "monthly_limit")
     private BigDecimal monthlyLimit;
 
     private LocalDateTime createdAt;

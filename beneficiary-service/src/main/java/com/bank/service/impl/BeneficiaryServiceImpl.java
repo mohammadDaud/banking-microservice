@@ -2,8 +2,12 @@ package com.bank.service.impl;
 
 import com.bank.client.KycClient;
 import com.bank.client.NotificationClient;
+import com.bank.common.enums.EventSource;
+import com.bank.common.enums.EventStatus;
 import com.bank.common.events.AuditEvent;
 import com.bank.common.topics.KafkaTopics;
+import com.bank.common.util.CorrelationIdUtil;
+import com.bank.common.util.EventMetadataUtil;
 import com.bank.dtos.*;
 import com.bank.enums.BeneficiaryStatus;
 import com.bank.exception.BeneficiaryAlreadyExistsException;
@@ -12,17 +16,24 @@ import com.bank.kafka.KafkaEventPublisher;
 import com.bank.model.Beneficiary;
 import com.bank.repository.BeneficiaryRepository;
 import com.bank.service.BeneficiaryService;
+import com.bank.util.IpUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class BeneficiaryServiceImpl implements BeneficiaryService {
+
+    private static final String SERVICE_NAME = "beneficiary-service";
+    public static final String CUSTOMER = "ROLE_CUSTOMER";
+    public static final String CHECKER = "ROLE_CHECKER";
 
     private final BeneficiaryRepository repository;
     private final NotificationClient notificationClient;
@@ -31,7 +42,7 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
 
     @Override
     @Transactional
-    public BeneficiaryResponse createBeneficiary(CreateBeneficiaryRequest request, String makerId) {
+    public BeneficiaryResponse createBeneficiary(CreateBeneficiaryRequest request, String makerId,HttpServletRequest httpServletRequest) {
 
         if (repository.existsByCustomerIdAndAccountNumber(
                 request.getCustomerId(), request.getAccountNumber())) {
@@ -69,22 +80,19 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
         publishAudit(
                 makerId,
                 savedBeneficiary.getBeneficiaryName(),
-                "ROLE_CUSTOMER",
+                CUSTOMER,
                 "BENEFICIARY_SUBMITTED_FOR_APPROVAL",
                 savedBeneficiary.getId(),
-                "Beneficiary submitted for checker approval"
+                "Beneficiary submitted for checker approval",
+                httpServletRequest
+        );
+        sendNotification(
+                savedBeneficiary.getCustomerId(),
+                "Beneficiary Pending Approval",
+                savedBeneficiary.getBeneficiaryName()
+                        + " has been submitted for approval"
         );
 
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(savedBeneficiary.getCustomerId())
-                        .title("Beneficiary Pending Approval")
-                        .message(savedBeneficiary.getBeneficiaryName()
-                                + " has been submitted for approval")
-                        .type("BENEFICIARY")
-                        .priority("HIGH")
-                        .build()
-        );
 
         return map(savedBeneficiary);
     }
@@ -99,7 +107,7 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
 
     @Override
     @Transactional
-    public BeneficiaryResponse approveBeneficiary(String beneficiaryId, String checkerId, String remarks) {
+    public BeneficiaryResponse approveBeneficiary(String beneficiaryId, String checkerId, String remarks,HttpServletRequest httpServletRequest) {
         Beneficiary beneficiary = getBeneficiary(beneficiaryId);
 
         if (beneficiary.getStatus() != BeneficiaryStatus.PENDING) {
@@ -120,24 +128,21 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
 
         Beneficiary approvedBeneficiary = repository.save(beneficiary);
 
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(approvedBeneficiary.getCustomerId())
-                        .title("Beneficiary Approved")
-                        .message(approvedBeneficiary.getBeneficiaryName()
-                                + " has been approved and can now be used for transfers")
-                        .type("BENEFICIARY")
-                        .priority("HIGH")
-                        .build()
+        sendNotification(
+                approvedBeneficiary.getCustomerId(),
+                "Beneficiary Approved",
+                approvedBeneficiary.getBeneficiaryName()
+                        + " has been approved and can now be used for transfers"
         );
 
         publishAudit(
                 checkerId,
                 approvedBeneficiary.getBeneficiaryName(),
-                "ROLE_CHECKER",
+                CHECKER,
                 "BENEFICIARY_APPROVED_BY_CHECKER",
                 approvedBeneficiary.getId(),
-                "Beneficiary approved by checker: " + checkerId
+                "Beneficiary approved by checker: " + checkerId,
+                httpServletRequest
         );
 
         return map(approvedBeneficiary);
@@ -145,7 +150,7 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
 
     @Override
     @Transactional
-    public BeneficiaryResponse rejectBeneficiary(String beneficiaryId, String checkerId, String remarks) {
+    public BeneficiaryResponse rejectBeneficiary(String beneficiaryId, String checkerId, String remarks,HttpServletRequest httpServletRequest) {
         Beneficiary beneficiary = getBeneficiary(beneficiaryId);
         if (beneficiary.getStatus() != BeneficiaryStatus.PENDING) {
             throw new IllegalStateException("Only pending beneficiary can be rejected");
@@ -167,25 +172,22 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
 
         Beneficiary rejectedBeneficiary = repository.save(beneficiary);
 
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(rejectedBeneficiary.getCustomerId())
-                        .title("Beneficiary Rejected")
-                        .message(rejectedBeneficiary.getBeneficiaryName()
-                                + " was rejected. Reason: " + remarks.trim())
-                        .type("BENEFICIARY")
-                        .priority("HIGH")
-                        .build()
+        sendNotification(
+                rejectedBeneficiary.getCustomerId(),
+                "Beneficiary Rejected",
+                rejectedBeneficiary.getBeneficiaryName()
+                        + " was rejected. Reason: " + remarks.trim()
         );
 
         publishAudit(
                 checkerId,
                 rejectedBeneficiary.getBeneficiaryName(),
-                "ROLE_CHECKER",
+                CHECKER,
                 "BENEFICIARY_REJECTED_BY_CHECKER",
                 rejectedBeneficiary.getId(),
                 "Beneficiary rejected by checker: " + checkerId
-                        + ". Remarks: " + remarks.trim()
+                        + ". Remarks: " + remarks.trim(),
+                httpServletRequest
         );
 
         return map(rejectedBeneficiary);
@@ -193,7 +195,7 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
 
     @Override
     @Transactional
-    public void deleteBeneficiary(String beneficiaryId, String customerId) {
+    public void deleteBeneficiary(String beneficiaryId, String customerId,HttpServletRequest  httpServletRequest) {
         Beneficiary beneficiary = getBeneficiary(beneficiaryId);
 
         if (!beneficiary.getCustomerId().equals(customerId)) {
@@ -213,10 +215,11 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
         publishAudit(
                 customerId,
                 beneficiary.getBeneficiaryName(),
-                "ROLE_CUSTOMER",
+                CUSTOMER,
                 "BENEFICIARY_REMOVED",
                 beneficiary.getId(),
-                "Beneficiary removed successfully"
+                "Beneficiary removed successfully",
+                httpServletRequest
         );
     }
 
@@ -277,34 +280,23 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
         if (checkerId == null || checkerId.isBlank()) {
             throw new IllegalArgumentException("Checker ID is required");
         }
-        if (beneficiary.getMakerId().equals(checkerId)) {
+        if (Objects.equals(beneficiary.getMakerId(), checkerId)) {
             throw new IllegalStateException("Maker cannot approve or reject their own beneficiary request");
         }
     }
 
-    private void publishAudit(
+    private void sendNotification(
             String userId,
-            String username,
-            String role,
-            String action,
-            String entityId,
-            String description) {
-
-        kafkaEventPublisher.publish(
-                KafkaTopics.AUDIT_LOG_TOPIC,
-                AuditEvent.builder()
+            String title,
+            String message) {
+        notificationClient.createNotification(
+                NotificationRequest.builder()
                         .userId(userId)
-                        .username(username)
-                        .role(role)
-                        .module("BENEFICIARY")
-                        .action(action)
-                        .entityId(entityId)
-                        .entityType("BENEFICIARY")
-                        .ipAddress("127.0.0.1")
-                        .description(description)
-                        .createdAt(LocalDateTime.now())
-                        .build()
-        );
+                        .title(title)
+                        .message(message)
+                        .type("BENEFICIARY")
+                        .priority("HIGH")
+                        .build());
     }
 
     private BeneficiaryResponse map(Beneficiary beneficiary) {
@@ -325,6 +317,60 @@ public class BeneficiaryServiceImpl implements BeneficiaryService {
                 .rejectedAt(beneficiary.getRejectedAt())
                 .createdAt(beneficiary.getCreatedAt())
                 .updatedAt(beneficiary.getUpdatedAt())
+                .build();
+    }
+
+    private void publishAudit(
+            String userId,
+            String username,
+            String role,
+            String action,
+            String entityId,
+            String description,
+            HttpServletRequest request) {
+
+        EventMetadata metadata = createEventMetadata();
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.AUDIT_LOG_TOPIC,
+                AuditEvent.builder()
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(metadata.getCorrelationId())
+                        .requestId(metadata.getRequestId())
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.BENEFICIARY_SERVICE)
+
+                        .requestUri(request != null ? request.getRequestURI() : null)
+                        .requestMethod(request != null ? request.getMethod() : null)
+
+                        .userId(userId)
+                        .username(username)
+                        .role(role)
+
+                        .module("BENEFICIARY")
+                        .action(action)
+                        .entityId(entityId)
+                        .entityType("BENEFICIARY")
+
+                        .description(description)
+
+                        .status(EventStatus.SUCCESS)
+
+                        .ipAddress(request != null
+                                ? IpUtil.getClientIp(request)
+                                : "SYSTEM")
+
+                        .createdAt(metadata.getCreatedAt())
+                        .build()
+        );
+    }
+
+    private EventMetadata createEventMetadata() {
+
+        return EventMetadata.builder()
+                .correlationId(CorrelationIdUtil.getCorrelationId())
+                .requestId(EventMetadataUtil.requestId())
+                .createdAt(EventMetadataUtil.createdAt())
                 .build();
     }
 }

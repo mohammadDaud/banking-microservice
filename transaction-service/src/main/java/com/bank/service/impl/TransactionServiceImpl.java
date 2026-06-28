@@ -1,9 +1,13 @@
 package com.bank.service.impl;
 
 import com.bank.client.*;
+import com.bank.common.enums.EventSource;
+import com.bank.common.enums.EventStatus;
 import com.bank.common.events.AuditEvent;
 import com.bank.common.events.NotificationEvent;
 import com.bank.common.topics.KafkaTopics;
+import com.bank.common.util.CorrelationIdUtil;
+import com.bank.common.util.EventMetadataUtil;
 import com.bank.dtos.*;
 import com.bank.enums.TransactionStatus;
 import com.bank.enums.TransactionType;
@@ -13,7 +17,9 @@ import com.bank.model.Transaction;
 import com.bank.repository.TransactionRepository;
 import com.bank.security.InternalServiceTokenProvider;
 import com.bank.service.TransactionService;
+import com.bank.util.IpUtil;
 import feign.FeignException;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -33,10 +39,11 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class TransactionServiceImpl implements TransactionService {
 
+    private static final String SERVICE_NAME = "transaction-service";
+
     private final TransactionRepository repository;
     private final AccountMoneyClient accountClient;
     private final TransactionReferenceClient transactionReferenceClient;
-    private final NotificationClient notificationClient;
     private final KafkaEventPublisher kafkaEventPublisher;
     private final TransactionLimitValidator limitValidator;
     private final BeneficiaryClient beneficiaryClient;
@@ -50,7 +57,7 @@ public class TransactionServiceImpl implements TransactionService {
 
     @Override
     @Transactional
-    public TransactionResponse deposit(AmountTransactionRequest request) {
+    public TransactionResponse deposit(AmountTransactionRequest request, HttpServletRequest httpServletRequest) {
         validateAmountTransactionRequest(request, "Deposit");
         creditAccount(request.getAccountNumber(), request.getAmount());
         Transaction transaction = saveTransaction(
@@ -62,21 +69,20 @@ public class TransactionServiceImpl implements TransactionService {
                 request.getDescription()
         );
 
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(request.getCustomerId())
-                        .title("Deposit Successful")
-                        .message("₹ " + request.getAmount() + " deposited successfully")
-                        .type("TRANSACTION")
-                        .priority("MEDIUM")
-                        .build()
+        publishNotification(
+                request.getCustomerId(),
+                "Deposit Successful",
+                "₹ " + request.getAmount() + " deposited successfully",
+                "MEDIUM",
+                EventStatus.SUCCESS
         );
 
         publishTransferAudit(
                 transaction,
                 "DEPOSIT_SUCCESS",
                 "Deposit ₹" + transaction.getAmount() + " completed successfully",
-                request.getCustomerId()
+                request.getCustomerId(),
+                httpServletRequest
         );
 
         return map(transaction);
@@ -84,7 +90,7 @@ public class TransactionServiceImpl implements TransactionService {
 
     @Override
     @Transactional
-    public TransactionResponse withdraw(AmountTransactionRequest request) {
+    public TransactionResponse withdraw(AmountTransactionRequest request, HttpServletRequest httpServletRequest) {
         validateAmountTransactionRequest(request, "Withdrawal");
         debitAccount(request.getAccountNumber(), request.getAmount());
         Transaction transaction = saveTransaction(
@@ -100,14 +106,16 @@ public class TransactionServiceImpl implements TransactionService {
                 request.getCustomerId(),
                 "Withdrawal Successful",
                 "₹ " + request.getAmount() + " withdrawn successfully",
-                "MEDIUM"
+                "MEDIUM",
+                EventStatus.SUCCESS
         );
 
         publishTransferAudit(
                 transaction,
                 "WITHDRAW_SUCCESS",
                 "Withdrawal ₹" + transaction.getAmount() + " completed successfully",
-                request.getCustomerId()
+                request.getCustomerId(),
+                httpServletRequest
         );
 
         return map(transaction);
@@ -121,7 +129,7 @@ public class TransactionServiceImpl implements TransactionService {
      * TransferExecutionService using REQUIRES_NEW transactions.
      */
     @Override
-    public TransactionResponse transfer(TransferRequest request) {
+    public TransactionResponse transfer(TransferRequest request, HttpServletRequest httpServletRequest) {
         log.info(
                 "Transfer request received. customerId={}, beneficiaryId={}, amount={}",
                 request.getCustomerId(),
@@ -179,7 +187,8 @@ public class TransactionServiceImpl implements TransactionService {
             return createRuleRejectedTransaction(
                     request,
                     destinationAccount,
-                    ruleResult
+                    ruleResult,
+                    httpServletRequest
             );
         }
 
@@ -187,7 +196,8 @@ public class TransactionServiceImpl implements TransactionService {
             return createPendingApprovalTransaction(
                     request,
                     destinationAccount,
-                    ruleResult
+                    ruleResult,
+                    httpServletRequest
             );
         }
 
@@ -195,7 +205,8 @@ public class TransactionServiceImpl implements TransactionService {
                 request,
                 destinationAccount,
                 ruleResult,
-                beneficiaryEligibility.getBeneficiaryId()
+                beneficiaryEligibility.getBeneficiaryId(),
+                httpServletRequest
         );
     }
 
@@ -306,7 +317,7 @@ public class TransactionServiceImpl implements TransactionService {
      * update all use separate REQUIRES_NEW transactions.
      */
     @Override
-    public TransactionResponse approvePendingTransaction(String transactionId, String checkerId, String remarks) {
+    public TransactionResponse approvePendingTransaction(String transactionId, String checkerId, String remarks, HttpServletRequest httpServletRequest) {
         validateCheckerId(checkerId);
         Transaction pendingTransaction = repository
                 .findByIdAndTransactionStatus(transactionId, TransactionStatus.PENDING_APPROVAL)
@@ -342,14 +353,16 @@ public class TransactionServiceImpl implements TransactionService {
                     approvedTransaction,
                     "TRANSFER_APPROVED_BY_CHECKER",
                     "Transfer approved by checker: " + checkerId,
-                    checkerId
+                    checkerId,
+                    httpServletRequest
             );
             publishNotification(
                     approvedTransaction.getCustomerId(),
                     "Transfer Approved",
                     "₹" + approvedTransaction.getAmount()
                             + " transfer has been approved",
-                    "HIGH"
+                    "HIGH",
+                    EventStatus.SUCCESS
             );
             return map(approvedTransaction);
 
@@ -382,7 +395,7 @@ public class TransactionServiceImpl implements TransactionService {
     public TransactionResponse rejectPendingTransaction(
             String transactionId,
             String checkerId,
-            String remarks) {
+            String remarks, HttpServletRequest httpServletRequest) {
 
         validateCheckerId(checkerId);
 
@@ -405,14 +418,16 @@ public class TransactionServiceImpl implements TransactionService {
                     rejectedTransaction,
                     "TRANSFER_REJECTED_BY_CHECKER",
                     "Transfer rejected by checker: " + checkerId,
-                    checkerId
+                    checkerId,
+                    httpServletRequest
             );
             publishNotification(
                     rejectedTransaction.getCustomerId(),
                     "Transfer Rejected",
                     "Your transfer of ₹" + rejectedTransaction.getAmount()
                             + " was rejected by checker. Remarks: " + remarks,
-                    "HIGH"
+                    "HIGH",
+                    EventStatus.FAILED
             );
             return map(rejectedTransaction);
 
@@ -436,7 +451,7 @@ public class TransactionServiceImpl implements TransactionService {
     private TransactionResponse createRuleRejectedTransaction(
             TransferRequest request,
             String destinationAccount,
-            RuleEvaluationResponse ruleResult) {
+            RuleEvaluationResponse ruleResult, HttpServletRequest httpServletRequest) {
 
         Transaction transaction = saveTransaction(
                 request.getCustomerId(),
@@ -455,14 +470,16 @@ public class TransactionServiceImpl implements TransactionService {
                 savedTransaction,
                 "TRANSFER_REJECTED_BY_RULE",
                 "Transfer rejected by BRE rule: " + safeReason(ruleResult),
-                request.getCustomerId()
+                request.getCustomerId(),
+                httpServletRequest
         );
 
         publishNotification(
                 request.getCustomerId(),
                 "Transfer Rejected",
                 "Your transfer was rejected: " + safeReason(ruleResult),
-                "HIGH"
+                "HIGH",
+                EventStatus.FAILED
         );
 
         return map(savedTransaction);
@@ -471,7 +488,7 @@ public class TransactionServiceImpl implements TransactionService {
     private TransactionResponse createPendingApprovalTransaction(
             TransferRequest request,
             String destinationAccount,
-            RuleEvaluationResponse ruleResult) {
+            RuleEvaluationResponse ruleResult, HttpServletRequest httpServletRequest) {
 
         Transaction transaction = saveTransaction(
                 request.getCustomerId(),
@@ -491,7 +508,8 @@ public class TransactionServiceImpl implements TransactionService {
                 "TRANSFER_PENDING_APPROVAL",
                 "Transfer requires checker approval. Rule: "
                         + ruleResult.getMatchedRuleCode(),
-                request.getCustomerId()
+                request.getCustomerId(),
+                httpServletRequest
         );
 
         publishNotification(
@@ -499,7 +517,8 @@ public class TransactionServiceImpl implements TransactionService {
                 "Transfer Pending Approval",
                 "₹" + request.getAmount()
                         + " transfer is waiting for checker approval",
-                "HIGH"
+                "HIGH",
+                EventStatus.PENDING
         );
 
         return map(savedTransaction);
@@ -509,7 +528,7 @@ public class TransactionServiceImpl implements TransactionService {
             TransferRequest request,
             String destinationAccount,
             RuleEvaluationResponse ruleResult,
-            String beneficiaryId) {
+            String beneficiaryId, HttpServletRequest httpServletRequest) {
 
         Transaction transaction = buildTransaction(
                 request.getCustomerId(),
@@ -543,14 +562,16 @@ public class TransactionServiceImpl implements TransactionService {
                     "Transfer ₹" + savedTransaction.getAmount()
                             + " transferred successfully to beneficiary "
                             + beneficiaryId,
-                    request.getCustomerId()
+                    request.getCustomerId(),
+                    httpServletRequest
             );
             publishNotification(
                     savedTransaction.getCustomerId(),
                     "Transaction Successful",
                     "₹" + savedTransaction.getAmount()
                             + " transferred successfully",
-                    "MEDIUM"
+                    "MEDIUM",
+                    EventStatus.SUCCESS
             );
             return map(savedTransaction);
 
@@ -704,9 +725,8 @@ public class TransactionServiceImpl implements TransactionService {
     private void debitAccount(String accountNumber, BigDecimal amount) {
         AmountRequest request = new AmountRequest();
         request.setAmount(amount);
-        String token = tokenProvider.getAccessToken();
         accountClient.debit(
-                "Bearer " + token,
+                "Bearer " + tokenProvider.getAccessToken(),
                 accountNumber,
                 request
         );
@@ -715,8 +735,7 @@ public class TransactionServiceImpl implements TransactionService {
     private void creditAccount(String accountNumber, BigDecimal amount) {
         AmountRequest request = new AmountRequest();
         request.setAmount(amount);
-        String token = tokenProvider.getAccessToken();
-        accountClient.credit("Bearer " + token,
+        accountClient.credit("Bearer " + tokenProvider.getAccessToken(),
                 accountNumber,
                 request
         );
@@ -803,42 +822,94 @@ public class TransactionServiceImpl implements TransactionService {
                 .build();
     }
 
+    /* private void publishNotification(
+             String userId,
+             String title,
+             String message,
+             String priority) {
+
+         kafkaEventPublisher.publish(
+                 KafkaTopics.NOTIFICATION_TOPIC,
+                 NotificationEvent.builder()
+                         .userId(userId)
+                         .title(title)
+                         .message(message)
+                         .type("TRANSACTION")
+                         .priority(priority)
+                         .build()
+         );
+     }*/
     private void publishNotification(
             String userId,
             String title,
             String message,
-            String priority) {
+            String priority,
+            EventStatus status) {
+
+        EventMetadata metadata = createEventMetadata();
 
         kafkaEventPublisher.publish(
                 KafkaTopics.NOTIFICATION_TOPIC,
+
                 NotificationEvent.builder()
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(metadata.getCorrelationId())
+                        .requestId(metadata.getRequestId())
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.TRANSACTION_SERVICE)
                         .userId(userId)
                         .title(title)
                         .message(message)
                         .type("TRANSACTION")
                         .priority(priority)
+                        .status(status)
+                        .createdAt(metadata.getCreatedAt())
                         .build()
         );
+    }
+
+    private EventMetadata createEventMetadata() {
+
+        return EventMetadata.builder()
+                .correlationId(
+                        CorrelationIdUtil.getCorrelationId())
+                .requestId(
+                        EventMetadataUtil.requestId())
+                .createdAt(
+                        EventMetadataUtil.createdAt())
+                .build();
     }
 
     private void publishTransferAudit(
             Transaction transaction,
             String action,
             String description,
-            String performedBy) {
-
+            String performedBy,
+            HttpServletRequest request) {
+        EventMetadata metadata = createEventMetadata();
         kafkaEventPublisher.publish(
                 KafkaTopics.AUDIT_LOG_TOPIC,
                 AuditEvent.builder()
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(metadata.getCorrelationId())
+                        .requestId(metadata.getRequestId())
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.TRANSACTION_SERVICE)
+                        .requestUri(request != null ? request.getRequestURI() : null)
+                        .requestMethod(request != null ? request.getMethod() : null)
                         .userId(performedBy)
+                        .username(transaction.getCustomerId())
+                        .role("ROLE_CUSTOMER")
                         .module("TRANSACTION")
                         .action(action)
                         .entityId(transaction.getId())
                         .entityType("TRANSACTION")
-                        .ipAddress("127.0.0.1")
                         .description(description)
-                        .createdAt(LocalDateTime.now())
+                        .status(EventStatus.SUCCESS)
+                        .ipAddress(request != null ? IpUtil.getClientIp(request) : "SYSTEM")
+                        .createdAt(metadata.getCreatedAt())
                         .build()
+
         );
     }
 

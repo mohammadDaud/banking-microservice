@@ -1,9 +1,9 @@
 package com.bank.controller;
 
-import com.bank.dtos.CreateKycRequest;
 import com.bank.dtos.KycEligibilityResponse;
 import com.bank.dtos.KycResponse;
 import com.bank.service.KycService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -22,7 +22,8 @@ public class KycController {
             @RequestParam String panNumber,
             @RequestParam String aadhaarNumber,
             @RequestPart MultipartFile panDocument,
-            @RequestPart MultipartFile aadhaarDocument) {
+            @RequestPart MultipartFile aadhaarDocument,
+            HttpServletRequest httpServletRequest) {
         System.out.println(
                 "KYC CREATE: userId=" + loggedInUserId
                         + ", pan=" + panNumber
@@ -35,7 +36,8 @@ public class KycController {
                 panNumber,
                 aadhaarNumber,
                 panDocument,
-                aadhaarDocument
+                aadhaarDocument,
+                httpServletRequest
         );
     }
 
@@ -48,14 +50,16 @@ public class KycController {
             @RequestParam String panNumber,
             @RequestParam String aadhaarNumber,
             @RequestPart MultipartFile panDocument,
-            @RequestPart MultipartFile aadhaarDocument) {
+            @RequestPart MultipartFile aadhaarDocument,
+            HttpServletRequest httpServletRequest) {
 
         return service.resubmitKyc(
                 loggedInUserId,
                 panNumber,
                 aadhaarNumber,
                 panDocument,
-                aadhaarDocument
+                aadhaarDocument,
+                httpServletRequest
         );
     }
 

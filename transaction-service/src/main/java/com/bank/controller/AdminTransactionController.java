@@ -5,6 +5,7 @@ import com.bank.dtos.MonthlyTransactionResponse;
 import com.bank.dtos.TransactionDashResponse;
 import com.bank.dtos.TransactionResponse;
 import com.bank.service.TransactionService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.*;
@@ -75,12 +76,13 @@ public class AdminTransactionController {
             @PathVariable String transactionId,
             @RequestHeader("X-User-Id") String checkerId,
             @RequestHeader("X-Roles") String roles,
-            @RequestBody CheckerActionRequest request) {
+            @RequestBody CheckerActionRequest request, HttpServletRequest httpServletRequest) {
         validateCheckerRole(roles);
         return service.approvePendingTransaction(
                 transactionId,
                 checkerId,
-                request.getRemarks()
+                request.getRemarks(),
+                httpServletRequest
         );
     }
 
@@ -88,7 +90,7 @@ public class AdminTransactionController {
     public TransactionResponse rejectTransaction(@PathVariable String transactionId,
                                                  @RequestHeader("X-User-Id") String checkerId,
                                                  @RequestHeader("X-Roles") String roles,
-                                                 @RequestBody CheckerActionRequest request) {
+                                                 @RequestBody CheckerActionRequest request,HttpServletRequest  httpServletRequest) {
         validateCheckerRole(roles);
 
         if (request.getRemarks() == null || request.getRemarks().isBlank()) {
@@ -97,7 +99,8 @@ public class AdminTransactionController {
         return service.rejectPendingTransaction(
                 transactionId,
                 checkerId,
-                request.getRemarks()
+                request.getRemarks(),
+                httpServletRequest
         );
     }
 

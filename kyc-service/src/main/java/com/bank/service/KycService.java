@@ -4,6 +4,7 @@ import com.bank.dtos.CreateKycRequest;
 import com.bank.dtos.KycApprovalRequest;
 import com.bank.dtos.KycEligibilityResponse;
 import com.bank.dtos.KycResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Collection;
@@ -17,7 +18,8 @@ public interface KycService {
             String panNumber,
             String aadhaarNumber,
             MultipartFile panDocument,
-            MultipartFile aadhaarDocument
+            MultipartFile aadhaarDocument,
+            HttpServletRequest httpServletRequest
     );
 
     KycResponse resubmitKyc(
@@ -25,7 +27,8 @@ public interface KycService {
             String panNumber,
             String aadhaarNumber,
             MultipartFile panDocument,
-            MultipartFile aadhaarDocument
+            MultipartFile aadhaarDocument,
+            HttpServletRequest httpServletRequest
     );
 
     KycResponse getKyc(String userId);
@@ -33,19 +36,22 @@ public interface KycService {
     KycResponse reviewKyc(
             String userId,
             String checkerId,
-            String remark
+            String remark,
+            HttpServletRequest httpServletRequest
     );
 
     KycResponse approveKyc(
             String userId,
             String checkerId,
-            String remark
+            String remark,
+            HttpServletRequest httpServletRequest
     );
 
     KycResponse rejectKyc(
             String userId,
             String checkerId,
-            String remark
+            String remark,
+            HttpServletRequest httpServletRequest
     );
 
     List<KycResponse> getPendingKyc();

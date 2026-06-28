@@ -4,6 +4,7 @@ import com.bank.accs.dtos.*;
 import com.bank.accs.model.Account;
 import com.bank.accs.service.AccountService;
 import com.bank.accs.service.PdfStatementService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -22,8 +23,8 @@ public class AccountController {
     private final PdfStatementService pdfService;
 
     @PostMapping
-    public CreateAccountResponse createAccount(@RequestBody CreateAccountRequest request) {
-        return service.createAccount(request);
+    public CreateAccountResponse createAccount(@RequestBody CreateAccountRequest request, HttpServletRequest  httpServletRequest) {
+        return service.createAccount(request,httpServletRequest);
     }
 
     @GetMapping("/{accountNumber}")
@@ -37,13 +38,17 @@ public class AccountController {
     }
 
     @PutMapping("/{accountNumber}/credit")
-    public void credit(@PathVariable String accountNumber,@RequestBody AmountRequest request) {
-        service.credit(accountNumber,request.getAmount());
+    public void credit(@PathVariable String accountNumber,
+                       @RequestBody AmountRequest request,
+                       HttpServletRequest  httpServletRequest) {
+        service.credit(accountNumber,request.getAmount(),httpServletRequest);
     }
 
     @PutMapping("/{accountNumber}/debit")
-    public void debit(@PathVariable String accountNumber,@RequestBody AmountRequest request) {
-        service.debit(accountNumber,request.getAmount());
+    public void debit(@PathVariable String accountNumber,
+                      @RequestBody AmountRequest request,
+                      HttpServletRequest  httpServletRequest) {
+        service.debit(accountNumber,request.getAmount(),httpServletRequest);
     }
 
     @GetMapping("/{accountNumber}/balance")
@@ -52,18 +57,18 @@ public class AccountController {
     }
 
     @PutMapping("/{accountNumber}/freeze")
-    public void freezeAccount(@PathVariable String accountNumber) {
-        service.freezeAccount(accountNumber);
+    public void freezeAccount(@PathVariable String accountNumber,HttpServletRequest  httpServletRequest) {
+        service.freezeAccount(accountNumber,httpServletRequest);
     }
 
     @PutMapping("/{accountNumber}/unfreeze")
-    public void unfreezeAccount(@PathVariable String accountNumber) {
-        service.unfreezeAccount(accountNumber);
+    public void unfreezeAccount(@PathVariable String accountNumber,HttpServletRequest  httpServletRequest) {
+        service.unfreezeAccount(accountNumber,httpServletRequest);
     }
 
     @PutMapping("/{accountNumber}/close")
-    public void closeAccount(@PathVariable String accountNumber) {
-        service.closeAccount(accountNumber);
+    public void closeAccount(@PathVariable String accountNumber,HttpServletRequest  httpServletRequest) {
+        service.closeAccount(accountNumber,httpServletRequest);
     }
 
     @GetMapping("/customer/{customerId}/summary")

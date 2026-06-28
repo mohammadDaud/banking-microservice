@@ -1,6 +1,7 @@
 package com.bank.as.service;
 
 import com.bank.as.kafka.KafkaEventPublisher;
+import com.bank.as.model.dtos.EventMetadata;
 import com.bank.as.model.dtos.RegisterRequest;
 import com.bank.as.model.entites.EmailVerificationToken;
 import com.bank.as.model.entites.PasswordHistory;
@@ -11,10 +12,14 @@ import com.bank.as.repository.PasswordHistoryRepository;
 import com.bank.as.repository.RoleRepository;
 import com.bank.as.repository.UserRepository;
 import com.bank.as.utill.IpUtil;
+import com.bank.common.enums.EventSource;
+import com.bank.common.enums.EventStatus;
 import com.bank.common.events.AuditEvent;
 import com.bank.common.events.EmailNotificationEvent;
 import com.bank.common.events.UserRegisteredEvent;
 import com.bank.common.topics.KafkaTopics;
+import com.bank.common.util.CorrelationIdUtil;
+import com.bank.common.util.EventMetadataUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -27,7 +32,6 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
-@Transactional
 public class AuthService {
 
     private final UserRepository userRepository;
@@ -36,152 +40,210 @@ public class AuthService {
     private final EmailVerificationTokenRepository emailVerificationTokenRepository;
     private final KafkaEventPublisher kafkaEventPublisher;
     private final PasswordHistoryRepository passwordHistoryRepository;
-    private final AuditService auditService;
+    private static final String SERVICE_NAME = "auth-service";
 
-
+    @Transactional
     public void register(RegisterRequest request, HttpServletRequest httpRequest) {
-        if (userRepository.existsByUsername(
-                request.getUsername())) {
 
-            throw new RuntimeException(
-                    "Username already exists");
+        validateRegistration(request);
+
+        User savedUser = createUser(request);
+
+        String verificationToken = createEmailVerificationToken(savedUser);
+
+        String correlationId = CorrelationIdUtil.getCorrelationId();
+        String requestId = EventMetadataUtil.requestId();
+        LocalDateTime createdAt = EventMetadataUtil.createdAt();
+
+        publishUserRegisteredEvent(savedUser, correlationId, requestId, createdAt);
+
+        publishEmailVerificationEvent(savedUser, verificationToken, correlationId, requestId, createdAt);
+
+        savePasswordHistory(savedUser, createdAt);
+
+        publishAuditEvent(savedUser, httpRequest, correlationId, requestId, createdAt);
+    }
+
+    @Transactional
+    public void verifyEmail(String token, HttpServletRequest httpRequest) {
+        EmailVerificationToken verificationToken =
+                emailVerificationTokenRepository.findByToken(token).orElseThrow(() ->
+                        new RuntimeException("Invalid token"));
+
+        if (verificationToken.getExpiryTime().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("Verification token expired");
         }
 
-        if (userRepository.existsByEmail(
-                request.getEmail())) {
+        User user = userRepository.findById(verificationToken.getUserId()).orElseThrow();
 
-            throw new RuntimeException(
-                    "Email already exists");
+        user.setEmailVerified(true);
+
+        userRepository.save(user);
+
+        publishAudit(
+                user,
+                "AUTH",
+                "EMAIL_VERIFIED",
+                "Email verified successfully",
+                httpRequest
+        );
+
+        verificationToken.setVerified(true);
+    }
+
+    private void validateRegistration(RegisterRequest request) {
+
+        if (userRepository.existsByUsername(request.getUsername())) {
+            throw new RuntimeException("Username already exists");
         }
 
-        Role role =
-                roleRepository
-                        .findByRoleName("ROLE_CUSTOMER")
-                        .orElseThrow();
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new RuntimeException("Email already exists");
+        }
+    }
 
-        User user =
-                User.builder()
-                        .id(UUID.randomUUID().toString())
-                        .username(request.getUsername())
-                        .email(request.getEmail())
-                        .password(passwordEncoder.encode(request.getPassword()))
-                        .enabled(true)
-                        .roles(Set.of(role))
-                        .build();
-        User savedUser =
-                userRepository.save(user);
-        String tokenemail = UUID.randomUUID().toString();
+    private User createUser(RegisterRequest request) {
+        Role role = roleRepository.findByRoleName("ROLE_CUSTOMER").orElseThrow();
+        User user = User.builder()
+                .id(UUID.randomUUID().toString())
+                .username(request.getUsername())
+                .email(request.getEmail())
+                .password(passwordEncoder.encode(request.getPassword()))
+                .enabled(true)
+                .roles(Set.of(role))
+                .build();
+        return userRepository.save(user);
+    }
+
+    private String createEmailVerificationToken(User user) {
+        String token = UUID.randomUUID().toString();
         emailVerificationTokenRepository.save(
                 EmailVerificationToken.builder()
-                        .token(tokenemail)
+                        .token(token)
                         .userId(user.getId())
                         .expiryTime(LocalDateTime.now().plusHours(24))
                         .verified(false)
                         .build());
-        kafkaEventPublisher.publish(
-                KafkaTopics.USER_REGISTRATION_TOPIC,
-                UserRegisteredEvent
-                        .builder()
-                        .userId(savedUser.getId())
-                        .username(savedUser.getUsername())
-                        .email(savedUser.getEmail())
-                        .build()
-        );
-        /*userRegistrationProducer
-                .publishUserRegisteredEvent(UserRegisteredEvent
-                                .builder()
-                                .userId(savedUser.getId())
-                                .username(savedUser.getUsername())
-                                .email(savedUser.getEmail())
-                                .build()
-                );*/
-         /*emailService.sendVerificationEmail(
-                user.getEmail(),
-                tokenemail);*/
-        /*notificationEventProducer
-         .sendEmailEvent(
-                 EmailNotificationEvent
-                         .builder()
-                         .to(user.getEmail())
-                         .subject("Verify Your Email")
-                         .body("Click the link:\n"
-                                 + "http://localhost:8081/api/auth/verify-email?token="
-                                 + tokenemail)
-                         .build());*/
-        kafkaEventPublisher.publish(
-                KafkaTopics.EMAIL_NOTIFICATION_TOPIC,
-                EmailNotificationEvent
-                        .builder()
-                        .to(user.getEmail())
-                        .subject("Verify Your Email")
-                        .body("Click the link:\n"
-                                + "http://localhost:8081/api/auth/verify-email?token="
-                                + tokenemail)
-                        .build()
-        );
+        return token;
+    }
+
+    private void savePasswordHistory(User user, LocalDateTime createdAt) {
         passwordHistoryRepository.save(
                 PasswordHistory.builder()
-                        .userId(savedUser.getId())
-                        .passwordHash(
-                                savedUser.getPassword())
-                        .createdAt(
-                                LocalDateTime.now())
+                        .userId(user.getId())
+                        .passwordHash(user.getPassword())
+                        .createdAt(createdAt)
                         .build());
-        /*auditService.audit(
-                savedUser.getId(),
-                savedUser.getUsername(),
-                "USER_REGISTERED",
-                IpUtil.getClientIp(httpRequest),
-                true,
-                "User registered successfully");*/
-        kafkaEventPublisher.publish(KafkaTopics.AUDIT_LOG_TOPIC,
+    }
+
+    private void publishUserRegisteredEvent(User user, String correlationId, String requestId, LocalDateTime createdAt) {
+        kafkaEventPublisher.publish(
+                KafkaTopics.USER_REGISTRATION_TOPIC,
+                UserRegisteredEvent.builder()
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(correlationId)
+                        .requestId(requestId)
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.AUTH_SERVICE)
+                        .userId(user.getId())
+                        .username(user.getUsername())
+                        .email(user.getEmail())
+                        .status(EventStatus.SUCCESS)
+                        .createdAt(createdAt)
+                        .build());
+    }
+
+    private void publishEmailVerificationEvent(User user, String verificationToken, String correlationId, String requestId, LocalDateTime createdAt) {
+        kafkaEventPublisher.publish(
+                KafkaTopics.EMAIL_NOTIFICATION_TOPIC,
+                EmailNotificationEvent.builder()
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(correlationId)
+                        .requestId(requestId)
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.AUTH_SERVICE)
+                        .to(user.getEmail())
+                        .subject("Verify Your Email")
+                        .body("Click the link below to verify your email:\n\n"
+                                + "http://localhost:8081/api/auth/verify-email?token="
+                                + verificationToken)
+                        .templateName("EMAIL_VERIFICATION")
+                        .status(EventStatus.PENDING)
+                        .createdAt(createdAt)
+                        .build());
+    }
+
+    private void publishAuditEvent(User user, HttpServletRequest request, String correlationId, String requestId, LocalDateTime createdAt) {
+        kafkaEventPublisher.publish(
+                KafkaTopics.AUDIT_LOG_TOPIC,
                 AuditEvent.builder()
-                        .userId(savedUser.getId())
-                        .username(savedUser.getUsername())
-                        .role(savedUser.getRoles()
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(correlationId)
+                        .requestId(requestId)
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.AUTH_SERVICE)
+                        .requestUri(request.getRequestURI())
+                        .requestMethod(request.getMethod())
+                        .ipAddress(IpUtil.getClientIp(request))
+                        .userId(user.getId())
+                        .username(user.getUsername())
+                        .role(user.getRoles()
                                 .stream()
                                 .findFirst()
                                 .map(Role::getRoleName)
                                 .orElse("ROLE_CUSTOMER"))
                         .module("AUTH")
                         .action("REGISTERED_SUCCESS")
-                        .entityId(savedUser.getId())
+                        .entityId(user.getId())
                         .entityType("USER")
-                        .ipAddress(IpUtil.getClientIp(httpRequest))
                         .description("User registered successfully")
-                        .createdAt(LocalDateTime.now())
+                        .status(EventStatus.SUCCESS)
+                        .createdAt(createdAt)
+                        .build());
+    }
+
+    private void publishAudit(
+            User user,
+            String module,
+            String action,
+            String description,
+            HttpServletRequest request) {
+        EventMetadata metadata = createEventMetadata();
+        kafkaEventPublisher.publish(
+                KafkaTopics.AUDIT_LOG_TOPIC,
+                AuditEvent.builder()
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(metadata.getCorrelationId())
+                        .requestId(metadata.getRequestId())
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.AUTH_SERVICE)
+                        .requestUri(request.getRequestURI())
+                        .requestMethod(request.getMethod())
+                        .userId(user.getId())
+                        .username(user.getUsername())
+                        .role(user.getRoles()
+                                .stream()
+                                .findFirst()
+                                .map(Role::getRoleName)
+                                .orElse("ROLE_CUSTOMER"))
+                        .module(module)
+                        .action(action)
+                        .entityId(user.getId())
+                        .entityType("USER")
+                        .description(description)
+                        .status(EventStatus.SUCCESS)
+                        .ipAddress(IpUtil.getClientIp(request))
+                        .createdAt(metadata.getCreatedAt())
                         .build()
 
         );
     }
+    private EventMetadata createEventMetadata() {
 
-    @Transactional
-    public void verifyEmail(String token) {
-
-        EmailVerificationToken verificationToken =
-                emailVerificationTokenRepository
-                        .findByToken(token)
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Invalid token"));
-
-        if (verificationToken
-                .getExpiryTime()
-                .isBefore(LocalDateTime.now())) {
-
-            throw new RuntimeException(
-                    "Verification token expired");
-        }
-
-        User user =
-                userRepository.findById(
-                                verificationToken.getUserId())
-                        .orElseThrow();
-
-        user.setEmailVerified(true);
-
-        userRepository.save(user);
-
-        verificationToken.setVerified(true);
+        return EventMetadata.builder()
+                .correlationId(CorrelationIdUtil.getCorrelationId())
+                .requestId(EventMetadataUtil.requestId())
+                .createdAt(EventMetadataUtil.createdAt())
+                .build();
     }
 }

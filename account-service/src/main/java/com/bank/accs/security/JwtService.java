@@ -93,6 +93,8 @@ public class JwtService {
 
         } catch (Exception ex) {
 
+            ex.printStackTrace();   // <---- ADD THIS
+
             return false;
         }
     }

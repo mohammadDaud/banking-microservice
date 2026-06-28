@@ -4,6 +4,7 @@ import com.bank.accs.dtos.AccountDashResponse;
 import com.bank.accs.dtos.AccountResponse;
 import com.bank.accs.dtos.AccountTypeStatResponse;
 import com.bank.accs.service.AccountService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.*;
@@ -23,18 +24,18 @@ public class AdminAccountController {
     }
 
     @PutMapping("/{accountNumber}/freeze")
-    public void freeze(@PathVariable String accountNumber) {
-        service.freezeAccount(accountNumber);
+    public void freeze(@PathVariable String accountNumber, HttpServletRequest httpServletRequest) {
+        service.freezeAccount(accountNumber,httpServletRequest);
     }
 
     @PutMapping("/{accountNumber}/unfreeze")
-    public void unfreeze(@PathVariable String accountNumber) {
-        service.unfreezeAccount(accountNumber);
+    public void unfreeze(@PathVariable String accountNumber, HttpServletRequest httpServletRequest) {
+        service.unfreezeAccount(accountNumber,httpServletRequest);
     }
 
     @PutMapping("/{accountNumber}/close")
-    public void close(@PathVariable String accountNumber) {
-        service.closeAccount(accountNumber);
+    public void close(@PathVariable String accountNumber, HttpServletRequest httpServletRequest) {
+        service.closeAccount(accountNumber,httpServletRequest);
     }
 
     @GetMapping("/count")

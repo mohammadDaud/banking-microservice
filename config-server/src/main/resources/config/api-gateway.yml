@@ -41,7 +41,7 @@ spring:
         - id: account-service
           uri: lb://account-service
           predicates:
-            - Path=/api/accounts/**
+            - Path=/api/accounts/**,/api/admin/accounts/**
 
         # ACCOUNT NUMBER GENERATOR
         - id: accountnumbergen-service
@@ -166,7 +166,7 @@ spring:
             - RewritePath=/rule/(?<segment>.*), /${segment}
 
 jwt:
-  secret: F7wez7S50RGr2wIvJ03oUPDOzvxmsEQZROunPOg/Jiem3q8sOIAUtsYaM41yzcIMCxkG8yag874v3Ae1foB4/A==
+  secret: $2a$10$z3kMFnMBz8F1S3tr6dj5HerUqBNBP4wMRiPfIV1MkgeyeJcT5Monm
 
 eureka:
   client:

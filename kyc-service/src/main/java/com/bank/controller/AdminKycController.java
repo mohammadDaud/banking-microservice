@@ -4,6 +4,7 @@ import com.bank.dtos.KycApprovalRequest;
 import com.bank.dtos.KycResponse;
 import com.bank.dtos.KycStatResponse;
 import com.bank.service.KycService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,10 +31,11 @@ public class AdminKycController {
             @PathVariable String userId,
             @RequestHeader("X-User-Id") String checkerId,
             @RequestHeader("X-Roles") String roles,
-            @RequestBody KycApprovalRequest request) {
+            @RequestBody KycApprovalRequest request,
+            HttpServletRequest httpServletRequest) {
 
         validateCheckerRole(roles);
-        return service.reviewKyc(userId, checkerId, request.getRemark());
+        return service.reviewKyc(userId, checkerId, request.getRemark(), httpServletRequest);
     }
 
     @GetMapping
@@ -50,10 +52,11 @@ public class AdminKycController {
             @PathVariable String userId,
             @RequestHeader("X-User-Id") String checkerId,
             @RequestHeader("X-Roles") String roles,
-            @RequestBody KycApprovalRequest request) {
+            @RequestBody KycApprovalRequest request,
+            HttpServletRequest httpServletRequest) {
 
         validateCheckerRole(roles);
-        return service.approveKyc(userId, checkerId, request.getRemark());
+        return service.approveKyc(userId, checkerId, request.getRemark(), httpServletRequest);
     }
 
     @PutMapping("/{userId}/reject")
@@ -61,7 +64,8 @@ public class AdminKycController {
             @PathVariable String userId,
             @RequestHeader("X-User-Id") String checkerId,
             @RequestHeader("X-Roles") String roles,
-            @RequestBody KycApprovalRequest request) {
+            @RequestBody KycApprovalRequest request,
+            HttpServletRequest httpServletRequest) {
 
         validateCheckerRole(roles);
 
@@ -71,7 +75,7 @@ public class AdminKycController {
             );
         }
 
-        return service.rejectKyc(userId, checkerId, request.getRemark());
+        return service.rejectKyc(userId, checkerId, request.getRemark(), httpServletRequest);
     }
 
     @GetMapping("/pending-count")

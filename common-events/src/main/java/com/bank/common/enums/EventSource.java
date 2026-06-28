@@ -1,0 +1,24 @@
+package com.bank.common.enums;
+
+public enum EventSource {
+
+    AUTH_SERVICE,
+
+    ACCOUNT_SERVICE,
+
+    TRANSACTION_SERVICE,
+
+    BENEFICIARY_SERVICE,
+
+    KYC_SERVICE,
+
+    NOTIFICATION_SERVICE,
+
+    NOMINEE_SERVICE,
+
+    AUDIT_LOG_SERVICE,
+
+    GATEWAY,
+
+    USER_SERVICE,
+}

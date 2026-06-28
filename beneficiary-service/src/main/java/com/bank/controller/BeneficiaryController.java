@@ -4,6 +4,7 @@ import com.bank.dtos.BeneficiaryEligibilityResponse;
 import com.bank.dtos.BeneficiaryResponse;
 import com.bank.dtos.CreateBeneficiaryRequest;
 import com.bank.service.BeneficiaryService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,7 +18,7 @@ public class BeneficiaryController {
     private final BeneficiaryService service;
 
     @PostMapping
-    public BeneficiaryResponse createBeneficiary(@RequestBody CreateBeneficiaryRequest request, @RequestHeader("X-User-Id") String makerId) {
+    public BeneficiaryResponse createBeneficiary(@RequestBody CreateBeneficiaryRequest request, @RequestHeader("X-User-Id") String makerId, HttpServletRequest httpServletRequest) {
         /*
          * Security:
          * customerId in body must match authenticated gateway user.
@@ -25,7 +26,7 @@ public class BeneficiaryController {
         if (!makerId.equals(request.getCustomerId())) {
             throw new RuntimeException("You can create a beneficiary only for your own customer ID");
         }
-        return service.createBeneficiary(request, makerId);
+        return service.createBeneficiary(request, makerId, httpServletRequest);
     }
 
     @GetMapping("/customer/{customerId}")
@@ -46,8 +47,8 @@ public class BeneficiaryController {
     }
 
     @DeleteMapping("/{beneficiaryId}")
-    public void deleteBeneficiary(@PathVariable String beneficiaryId, @RequestHeader("X-User-Id") String loggedInUserId) {
-        service.deleteBeneficiary(beneficiaryId, loggedInUserId);
+    public void deleteBeneficiary(@PathVariable String beneficiaryId, @RequestHeader("X-User-Id") String loggedInUserId, HttpServletRequest httpServletRequest) {
+        service.deleteBeneficiary(beneficiaryId, loggedInUserId, httpServletRequest);
     }
 
     @GetMapping("/customer/{customerId}/count")

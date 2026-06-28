@@ -56,9 +56,9 @@ public class AuthController {
     )
     @PostMapping("/verify-otp")
     public AuthResponse verifyOtp(
-            @RequestBody VerifyOtpRequest request) {
+            @RequestBody VerifyOtpRequest request,HttpServletRequest servletRequest) {
 
-        return loginService.verifyOtp(request);
+        return loginService.verifyOtp(request, servletRequest);
     }
 
     @Operation(
@@ -104,17 +104,17 @@ public class AuthController {
 
     @Operation(summary = "Verify Email")
     @GetMapping("/verify-email")
-    public String verifyEmail(@RequestParam String token) {
-        authService.verifyEmail(token);
+    public String verifyEmail(@RequestParam String token,HttpServletRequest servletRequest) {
+        authService.verifyEmail(token, servletRequest);
         return "Email verified successfully";
     }
 
     @Operation(summary = "Forgot Password")
     @PostMapping("/forgot-password")
     public String forgotPassword(
-            @RequestBody ForgotPasswordRequest request) {
+            @RequestBody ForgotPasswordRequest request,HttpServletRequest servletRequest) {
 
-        return loginService.forgotPassword(request);
+        return loginService.forgotPassword(request, servletRequest);
     }
 
     @Operation(summary = "Reset Password")

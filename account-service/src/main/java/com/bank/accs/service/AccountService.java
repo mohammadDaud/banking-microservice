@@ -12,10 +12,16 @@ import com.bank.accs.model.TransactionLimit;
 import com.bank.accs.model.enums.AccountStatus;
 import com.bank.accs.repository.AccountRepository;
 import com.bank.accs.repository.TransactionLimitRepository;
+import com.bank.accs.util.IpUtil;
+import com.bank.common.enums.EventSource;
+import com.bank.common.enums.EventStatus;
 import com.bank.common.events.AuditEvent;
 import com.bank.common.topics.KafkaTopics;
+import com.bank.common.util.CorrelationIdUtil;
+import com.bank.common.util.EventMetadataUtil;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,8 +47,10 @@ public class AccountService {
     private final KycClient kycClient;
     private final TransactionLimitRepository transactionLimitRepository;
 
+    private static final String SERVICE_NAME = "auth-service";
+
     @Transactional
-    public CreateAccountResponse createAccount(CreateAccountRequest request) {
+    public CreateAccountResponse createAccount(CreateAccountRequest request,HttpServletRequest httpServletRequest) {
 
         KycEligibilityResponse kycEligibility =
                 kycClient.checkEligibility(request.getCustomerId());
@@ -82,10 +90,10 @@ public class AccountService {
         createDefaultTransactionLimit(savedAccount);
 
         publishAccountAudit(
-                savedAccount,
+                account,
                 "ACCOUNT_CREATED",
-                "Account " + savedAccount.getAccountNumber()
-                        + " created successfully"
+                "Account created successfully",
+                httpServletRequest
         );
 
         sendNotification(
@@ -107,7 +115,7 @@ public class AccountService {
     }
 
     @Transactional
-    public void credit(String accountNumber, BigDecimal amount) {
+    public void credit(String accountNumber, BigDecimal amount,HttpServletRequest httpServletRequest) {
 
         validateAmount(amount);
 
@@ -124,15 +132,17 @@ public class AccountService {
 
         repository.save(account);
 
+
         publishAccountAudit(
                 account,
-                "ACCOUNT_CREDITED",
-                "Account credited by ₹" + amount
+                "CREDIT_ACCOUNT",
+                "Account credited by ₹" + amount,
+                httpServletRequest
         );
     }
 
     @Transactional
-    public void debit(String accountNumber, BigDecimal amount) {
+    public void debit(String accountNumber, BigDecimal amount,HttpServletRequest httpServletRequest) {
 
         validateAmount(amount);
 
@@ -155,8 +165,9 @@ public class AccountService {
 
         publishAccountAudit(
                 account,
-                "ACCOUNT_DEBITED",
-                "Account debited by ₹" + amount
+                "DEBIT_ACCOUNT",
+                "Account credited by ₹" + amount,
+                httpServletRequest
         );
     }
 
@@ -185,7 +196,7 @@ public class AccountService {
     }
 
     @Transactional
-    public void freezeAccount(String accountNumber) {
+    public void freezeAccount(String accountNumber,HttpServletRequest httpServletRequest) {
         Account account = getAccountEntity(accountNumber);
 
         account.setAccountStatus(AccountStatus.FROZEN);
@@ -193,10 +204,12 @@ public class AccountService {
 
         repository.save(account);
 
+
         publishAccountAudit(
                 account,
                 "ACCOUNT_FREEZE",
-                "Account " + account.getAccountNumber() + " has been frozen"
+                "Account " + account.getAccountNumber() + " has been frozen",
+                httpServletRequest
         );
 
         sendNotification(
@@ -212,7 +225,7 @@ public class AccountService {
     }
 
     @Transactional
-    public void unfreezeAccount(String accountNumber) {
+    public void unfreezeAccount(String accountNumber,HttpServletRequest httpServletRequest) {
         Account account = getAccountEntity(accountNumber);
 
         account.setAccountStatus(AccountStatus.ACTIVE);
@@ -220,12 +233,15 @@ public class AccountService {
 
         repository.save(account);
 
+
         publishAccountAudit(
                 account,
                 "ACCOUNT_UNFREEZE",
                 "Account " + account.getAccountNumber()
-                        + " activated successfully"
+                        + " activated successfully",
+                httpServletRequest
         );
+
 
         sendNotification(
                 NotificationRequest.builder()
@@ -240,7 +256,7 @@ public class AccountService {
     }
 
     @Transactional
-    public void closeAccount(String accountNumber) {
+    public void closeAccount(String accountNumber,HttpServletRequest httpServletRequest) {
         Account account = getAccountEntity(accountNumber);
 
         if (account.getAvailableBalance().compareTo(BigDecimal.ZERO) != 0) {
@@ -254,12 +270,13 @@ public class AccountService {
 
         repository.save(account);
 
+
         publishAccountAudit(
                 account,
                 "ACCOUNT_CLOSED",
-                "Account " + account.getAccountNumber() + " has been closed"
+                "Account " + account.getAccountNumber() + " has been closed",
+                httpServletRequest
         );
-
         sendNotification(
                 NotificationRequest.builder()
                         .userId(account.getCustomerId())
@@ -430,26 +447,58 @@ public class AccountService {
             throw new RuntimeException("Cannot credit a closed account");
         }
     }
-
     private void publishAccountAudit(
             Account account,
             String action,
-            String description) {
+            String description,
+            HttpServletRequest request) {
+
+        EventMetadata metadata = createEventMetadata();
 
         kafkaEventPublisher.publish(
                 KafkaTopics.AUDIT_LOG_TOPIC,
                 AuditEvent.builder()
+
+                        // Event Metadata
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(metadata.getCorrelationId())
+                        .requestId(metadata.getRequestId())
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.ACCOUNT_SERVICE)
+
+                        // Request Information
+                        .requestUri(request != null ? request.getRequestURI() : null)
+                        .requestMethod(request != null ? request.getMethod() : null)
+                        .ipAddress(request != null
+                                ? IpUtil.getClientIp(request)
+                                : "SYSTEM")
+
+                        // User Information
                         .userId(account.getCustomerId())
                         .username(account.getAccountNumber())
-                        .role("Account")
+                        .role("ROLE_CUSTOMER")
+
+                        // Audit Information
                         .module("ACCOUNT")
                         .action(action)
                         .entityId(account.getId())
                         .entityType("ACCOUNT")
-                        .ipAddress("127.0.0.1")
                         .description(description)
-                        .createdAt(LocalDateTime.now())
+                        .status(EventStatus.SUCCESS)
+
+                        // Timestamp
+                        .createdAt(metadata.getCreatedAt())
+
                         .build()
         );
+    }
+
+    private EventMetadata createEventMetadata() {
+
+        return EventMetadata.builder()
+                .correlationId(CorrelationIdUtil.getCorrelationId())
+                .requestId(EventMetadataUtil.requestId())
+                .createdAt(EventMetadataUtil.createdAt())
+                .build();
     }
 }

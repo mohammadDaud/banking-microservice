@@ -1,9 +1,14 @@
 package com.bank.service.impl;
 
 import com.bank.client.NotificationClient;
+import com.bank.common.enums.EventSource;
+import com.bank.common.enums.EventStatus;
 import com.bank.common.events.AuditEvent;
 import com.bank.common.events.NotificationEvent;
 import com.bank.common.topics.KafkaTopics;
+import com.bank.common.util.CorrelationIdUtil;
+import com.bank.common.util.EventMetadataUtil;
+import com.bank.dtos.EventMetadata;
 import com.bank.dtos.KycEligibilityResponse;
 import com.bank.dtos.KycResponse;
 import com.bank.dtos.NotificationRequest;
@@ -15,18 +20,25 @@ import com.bank.model.KycProfile;
 import com.bank.repository.KycRepository;
 import com.bank.service.FileStorageService;
 import com.bank.service.KycService;
+import com.bank.util.IpUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class KycServiceImpl implements KycService {
+
+    private static final String SERVICE_NAME = "kyc-service";
 
     private final KycRepository repository;
     private final FileStorageService fileStorageService;
@@ -40,7 +52,8 @@ public class KycServiceImpl implements KycService {
             String panNumber,
             String aadhaarNumber,
             MultipartFile panDocument,
-            MultipartFile aadhaarDocument) {
+            MultipartFile aadhaarDocument,
+            HttpServletRequest httpServletRequest) {
 
         if (repository.existsByUserId(userId)) {
             throw new KycAlreadyExistsException("KYC already submitted");
@@ -68,19 +81,18 @@ public class KycServiceImpl implements KycService {
                 .build();
 
         KycProfile savedProfile = repository.save(profile);
-        System.out.println(
+        log.debug(
                 "KYC CREATE Service : userId=" + userId
                         + ", pan=" + panNumber
                         + ", aadhaar=" + aadhaarNumber
                         + ", panFile=" + panDocument.getOriginalFilename()
                         + ", aadhaarFile=" + aadhaarDocument.getOriginalFilename()
         );
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(savedProfile.getUserId())
-                        .title("KYC Submitted")
-                        .message("Your KYC request has been submitted for approval")
-                        .build()
+
+        sendNotification(
+                savedProfile.getUserId(),
+                "KYC Submitted",
+                "Your KYC request has been submitted for approval"
         );
 
         publishAudit(
@@ -88,7 +100,8 @@ public class KycServiceImpl implements KycService {
                 "ROLE_CUSTOMER",
                 "KYC_SUBMITTED_FOR_APPROVAL",
                 savedProfile,
-                "KYC submitted for checker review"
+                "KYC submitted for checker review",
+                httpServletRequest
         );
 
         return map(savedProfile);
@@ -101,7 +114,8 @@ public class KycServiceImpl implements KycService {
             String panNumber,
             String aadhaarNumber,
             MultipartFile panDocument,
-            MultipartFile aadhaarDocument) {
+            MultipartFile aadhaarDocument,
+            HttpServletRequest httpServletRequest) {
 
         KycProfile profile = getProfile(userId);
 
@@ -140,14 +154,10 @@ public class KycServiceImpl implements KycService {
 
         KycProfile savedProfile = repository.save(profile);
 
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(savedProfile.getUserId())
-                        .title("KYC Resubmitted")
-                        .message(
-                                "Your corrected KYC documents were submitted for approval"
-                        )
-                        .build()
+        sendNotification(
+                savedProfile.getUserId(),
+                "KYC Resubmitted",
+                "Your corrected KYC documents were submitted for approval"
         );
 
         publishAudit(
@@ -155,7 +165,8 @@ public class KycServiceImpl implements KycService {
                 "ROLE_CUSTOMER",
                 "KYC_RESUBMITTED_FOR_APPROVAL",
                 savedProfile,
-                "KYC resubmitted after rejection"
+                "KYC resubmitted after rejection",
+                httpServletRequest
         );
 
         return map(savedProfile);
@@ -171,7 +182,7 @@ public class KycServiceImpl implements KycService {
     public KycResponse reviewKyc(
             String userId,
             String checkerId,
-            String remark) {
+            String remark, HttpServletRequest httpServletRequest) {
 
         KycProfile profile = getProfile(userId);
 
@@ -197,21 +208,16 @@ public class KycServiceImpl implements KycService {
         profile.setUpdatedAt(now);
 
         KycProfile savedProfile = repository.save(profile);
-
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(savedProfile.getUserId())
-                        .title("KYC Under Review")
-                        .message("Your KYC is currently under review")
-                        .build()
-        );
+        sendNotification(savedProfile.getUserId(), "KYC Under Review",
+                "Your KYC is currently under review");
 
         publishAudit(
                 checkerId,
                 "ROLE_CHECKER",
                 "KYC_MOVED_TO_UNDER_REVIEW",
                 savedProfile,
-                "KYC moved to UNDER_REVIEW by checker: " + checkerId
+                "KYC moved to UNDER_REVIEW by checker: " + checkerId,
+                httpServletRequest
         );
 
         return map(savedProfile);
@@ -222,7 +228,8 @@ public class KycServiceImpl implements KycService {
     public KycResponse approveKyc(
             String userId,
             String checkerId,
-            String remark) {
+            String remark,
+            HttpServletRequest httpServletRequest) {
 
         KycProfile profile = getProfile(userId);
 
@@ -249,31 +256,26 @@ public class KycServiceImpl implements KycService {
 
         KycProfile savedProfile = repository.save(profile);
 
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(savedProfile.getUserId())
-                        .title("KYC Approved")
-                        .message("Your KYC has been approved successfully")
-                        .build()
-        );
+        sendNotification(
+                savedProfile.getUserId(),
+                "KYC Approved",
+                "Your KYC has been approved successfully");
 
         publishAudit(
                 checkerId,
                 "ROLE_CHECKER",
                 "KYC_APPROVED",
                 savedProfile,
-                "KYC approved by checker: " + checkerId
+                "KYC approved by checker: " + checkerId,
+                httpServletRequest
         );
-
-        kafkaEventPublisher.publish(
-                KafkaTopics.NOTIFICATION_TOPIC,
-                NotificationEvent.builder()
-                        .userId(savedProfile.getUserId())
-                        .title("KYC Approved")
-                        .message("Your KYC has been approved")
-                        .type("KYC")
-                        .priority("HIGH")
-                        .build()
+        publishNotificationEvent(
+                savedProfile.getUserId(),
+                "KYC Approved",
+                "Your KYC has been approved",
+                "KYC",
+                "HIGH",
+                EventStatus.SUCCESS
         );
 
         return map(savedProfile);
@@ -284,7 +286,8 @@ public class KycServiceImpl implements KycService {
     public KycResponse rejectKyc(
             String userId,
             String checkerId,
-            String remark) {
+            String remark,
+            HttpServletRequest httpServletRequest) {
 
         KycProfile profile = getProfile(userId);
 
@@ -314,38 +317,30 @@ public class KycServiceImpl implements KycService {
 
         KycProfile savedProfile = repository.save(profile);
 
-        notificationClient.createNotification(
-                NotificationRequest.builder()
-                        .userId(savedProfile.getUserId())
-                        .title("KYC Rejected")
-                        .message(
-                                "Your KYC was rejected. Reason: "
-                                        + rejectionRemark
-                        )
-                        .build()
-        );
 
+        sendNotification(
+                savedProfile.getUserId(),
+                "KYC Rejected",
+                "Your KYC was rejected. Reason: "
+                        + rejectionRemark
+        );
         publishAudit(
                 checkerId,
                 "ROLE_CHECKER",
                 "KYC_REJECTED",
                 savedProfile,
                 "KYC rejected by checker: " + checkerId
-                        + ". Remark: " + rejectionRemark
+                        + ". Remark: " + rejectionRemark,
+                httpServletRequest
         );
-
-        kafkaEventPublisher.publish(
-                KafkaTopics.NOTIFICATION_TOPIC,
-                NotificationEvent.builder()
-                        .userId(savedProfile.getUserId())
-                        .title("KYC Rejected")
-                        .message(
-                                "Your KYC was rejected. Reason: "
-                                        + rejectionRemark
-                        )
-                        .type("KYC")
-                        .priority("HIGH")
-                        .build()
+        publishNotificationEvent(
+                savedProfile.getUserId(),
+                "KYC Rejected",
+                "Your KYC was rejected. Reason: "
+                        + rejectionRemark,
+                "KYC",
+                "HIGH",
+                EventStatus.SUCCESS
         );
 
         return map(savedProfile);
@@ -371,18 +366,13 @@ public class KycServiceImpl implements KycService {
 
     @Override
     public KycEligibilityResponse checkEligibility(String userId) {
-
         KycProfile profile = getProfile(userId);
-
-        boolean eligible =
-                profile.getKycStatus() == KycStatus.APPROVED;
-
+        boolean eligible = profile.getKycStatus() == KycStatus.APPROVED;
         return KycEligibilityResponse.builder()
                 .userId(profile.getUserId())
                 .eligible(eligible)
                 .status(profile.getKycStatus().name())
-                .message(
-                        eligible
+                .message(eligible
                                 ? "Customer KYC is approved"
                                 : "Customer KYC is "
                                   + profile.getKycStatus()
@@ -452,7 +442,7 @@ public class KycServiceImpl implements KycService {
             String checkerId) {
 
         if (profile.getCheckerId() == null
-                || !profile.getCheckerId().equals(checkerId)) {
+                || !Objects.equals(profile.getCheckerId(),checkerId)) {
 
             throw new IllegalStateException(
                     "Only the checker assigned during review "
@@ -510,21 +500,83 @@ public class KycServiceImpl implements KycService {
             String role,
             String action,
             KycProfile profile,
-            String description) {
-
+            String description,
+            HttpServletRequest request) {
+        EventMetadata metadata = createEventMetadata();
         kafkaEventPublisher.publish(
                 KafkaTopics.AUDIT_LOG_TOPIC,
                 AuditEvent.builder()
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(metadata.getCorrelationId())
+                        .requestId(metadata.getRequestId())
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.KYC_SERVICE)
+                        .requestUri(request != null ? request.getRequestURI() : null)
+                        .requestMethod(request != null ? request.getMethod() : null)
                         .userId(userId)
-                        .username(null)
+                        .username(profile.getUserId())
                         .role(role)
                         .module("KYC")
                         .action(action)
                         .entityId(profile.getId())
                         .entityType("KYC")
-                        .ipAddress("127.0.0.1")
                         .description(description)
-                        .createdAt(LocalDateTime.now())
+                        .status(EventStatus.SUCCESS)
+                        .ipAddress(request != null
+                                ? IpUtil.getClientIp(request)
+                                : "SYSTEM")
+                        .createdAt(metadata.getCreatedAt())
+                        .build()
+        );
+    }
+
+    private EventMetadata createEventMetadata() {
+        return EventMetadata.builder()
+                .correlationId(CorrelationIdUtil.getCorrelationId())
+                .requestId(EventMetadataUtil.requestId())
+                .createdAt(EventMetadataUtil.createdAt())
+                .build();
+    }
+
+    private void sendNotification(
+            String userId,
+            String title,
+            String message) {
+
+        notificationClient.createNotification(
+                NotificationRequest.builder()
+                        .userId(userId)
+                        .title(title)
+                        .message(message)
+                        .build()
+        );
+    }
+
+    private void publishNotificationEvent(
+            String userId,
+            String title,
+            String message,
+            String type,
+            String priority,
+            EventStatus status) {
+
+        EventMetadata metadata = createEventMetadata();
+
+        kafkaEventPublisher.publish(
+                KafkaTopics.NOTIFICATION_TOPIC,
+                NotificationEvent.builder()
+                        .eventId(EventMetadataUtil.eventId())
+                        .correlationId(metadata.getCorrelationId())
+                        .requestId(metadata.getRequestId())
+                        .serviceName(SERVICE_NAME)
+                        .source(EventSource.KYC_SERVICE)
+                        .userId(userId)
+                        .title(title)
+                        .message(message)
+                        .type(type)
+                        .priority(priority)
+                        .status(status)
+                        .createdAt(metadata.getCreatedAt())
                         .build()
         );
     }

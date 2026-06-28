@@ -5,6 +5,7 @@ import com.bank.dtos.StatementTransactionResponse;
 import com.bank.dtos.TransactionResponse;
 import com.bank.dtos.TransferRequest;
 import com.bank.service.TransactionService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,25 +20,25 @@ public class TransactionController {
     private final TransactionService service;
 
     @PostMapping("/deposit")
-    public TransactionResponse deposit(@RequestBody AmountTransactionRequest request) {
-        return service.deposit(request);
+    public TransactionResponse deposit(@RequestBody AmountTransactionRequest request, HttpServletRequest httpServletRequest) {
+        return service.deposit(request, httpServletRequest);
     }
 
     @PostMapping("/withdraw")
-    public TransactionResponse withdraw(@RequestBody AmountTransactionRequest request) {
-        return service.withdraw(request);
+    public TransactionResponse withdraw(@RequestBody AmountTransactionRequest request,HttpServletRequest  httpServletRequest) {
+        return service.withdraw(request, httpServletRequest);
     }
 
     @PostMapping("/transfer")
     public TransactionResponse transfer(
             @RequestHeader("X-User-Id") String customerId,
             @RequestHeader(value = "X-User-Roles", required = false) String roles,
-            @RequestBody TransferRequest request) {
+            @RequestBody TransferRequest request,HttpServletRequest  httpServletRequest) {
         if (roles != null && !roles.contains("ROLE_CUSTOMER")) {
             throw new IllegalStateException("Only customers can create transfers");
         }
         request.setCustomerId(customerId);
-        return service.transfer(request);
+        return service.transfer(request, httpServletRequest);
     }
 
 
