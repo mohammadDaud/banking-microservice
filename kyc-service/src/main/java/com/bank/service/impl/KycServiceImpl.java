@@ -372,10 +372,10 @@ public class KycServiceImpl implements KycService {
                 .eligible(eligible)
                 .status(profile.getKycStatus().name())
                 .message(eligible
-                                ? "Customer KYC is approved"
-                                : "Customer KYC is "
-                                  + profile.getKycStatus()
-                                  + ". Banking operation requires APPROVED KYC"
+                        ? "Customer KYC is approved"
+                        : "Customer KYC is "
+                          + profile.getKycStatus()
+                          + ". Banking operation requires APPROVED KYC"
                 )
                 .build();
     }
@@ -418,14 +418,14 @@ public class KycServiceImpl implements KycService {
         LocalDateTime start = today.atStartOfDay();
         LocalDateTime end = today.atTime(LocalTime.MAX);
         long total = repository.count();
-        long approved = repository.countByStatus(KycStatus.APPROVED);
+        long approved = repository.countByKycStatus(KycStatus.APPROVED.name());
         return KycDashboardResponse.builder()
                 .totalKyc(total)
-                .pendingKyc(repository.countByStatus(KycStatus.PENDING))
-                .underReviewKyc(repository.countByStatus(KycStatus.UNDER_REVIEW))
+                .pendingKyc(repository.countByKycStatus(KycStatus.PENDING.name()))
+                .underReviewKyc(repository.countByKycStatus(KycStatus.UNDER_REVIEW.name()))
                 .approvedKyc(approved)
-                .rejectedKyc(repository.countByStatus(KycStatus.REJECTED))
-                .submittedToday(repository.countByCreatedAtBetween(start,end))
+                .rejectedKyc(repository.countByKycStatus(KycStatus.REJECTED.name()))
+                .submittedToday(repository.countByCreatedAtBetween(start, end))
                 .approvalRate(total == 0 ? 0 : ((double) approved / total) * 100)
                 .build();
     }
@@ -459,7 +459,7 @@ public class KycServiceImpl implements KycService {
             String checkerId) {
 
         if (profile.getCheckerId() == null
-                || !Objects.equals(profile.getCheckerId(),checkerId)) {
+                || !Objects.equals(profile.getCheckerId(), checkerId)) {
 
             throw new IllegalStateException(
                     "Only the checker assigned during review "

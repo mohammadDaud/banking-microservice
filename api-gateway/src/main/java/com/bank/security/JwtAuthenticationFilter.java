@@ -115,6 +115,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
          * Never trust identity headers sent by browser/Postman.
          * Remove them first, then insert values extracted from the valid JWT.
          */
+
         ServerHttpRequest trustedRequest = exchange.getRequest()
                 .mutate()
                 .headers(headers -> {
@@ -125,6 +126,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                     headers.add("X-User", username);
                     headers.add("X-User-Id", userId);
                     headers.add("X-Roles", String.join(",", roles));
+
                 })
                 .build();
 

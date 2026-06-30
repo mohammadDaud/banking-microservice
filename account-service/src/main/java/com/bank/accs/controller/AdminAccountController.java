@@ -4,6 +4,7 @@ import com.bank.accs.dtos.AccountDashResponse;
 import com.bank.accs.dtos.AccountDashboardResponse;
 import com.bank.accs.dtos.AccountResponse;
 import com.bank.accs.dtos.AccountTypeStatResponse;
+import com.bank.accs.model.enums.AccountStatus;
 import com.bank.accs.service.AccountService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -46,7 +47,7 @@ public class AdminAccountController {
 
     @GetMapping("/active-count")
     public Long activeCount() {
-        return service.countByStatus("ACTIVE");
+        return service.countByStatus(AccountStatus.ACTIVE);
     }
 
     @GetMapping("/type-stats")

@@ -1,4 +1,4 @@
-package com.bank.common.config;
+package com.bank.config;
 
 import com.bank.common.constants.CorrelationConstants;
 import com.bank.common.util.CorrelationIdUtil;

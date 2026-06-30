@@ -31,6 +31,6 @@ public interface KycRepository extends JpaRepository<KycProfile,String> {
     List<KycProfile> findByKycStatusIn(List<KycStatus> statuses);
 
     long count();
-    long countByStatus(KycStatus status);
+    long countByKycStatus(KycStatus status);
     long countByCreatedAtBetween(LocalDateTime start,LocalDateTime end);
 }

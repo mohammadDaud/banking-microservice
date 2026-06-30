@@ -23,6 +23,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -271,13 +272,15 @@ public class TransactionServiceImpl implements TransactionService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Transaction> findAllByOrderByTransactionDateDesc(PageRequest pageRequest) {
-        return repository.findAllByOrderByTransactionDateDesc(
-                PageRequest.of(
-                        pageRequest.getPageNumber(),
-                        pageRequest.getPageSize()
-                )
-        );
+    public List<TransactionDashResponse> getRecentTransactions(int limit) {
+
+        Pageable pageable = PageRequest.of(0, limit);
+
+        return repository
+                .findAllByOrderByTransactionDateDesc(pageable)
+                .stream()
+                .map(this::mapToDashboardResponse)
+                .toList();
     }
 
     @Override
@@ -460,11 +463,11 @@ public class TransactionServiceImpl implements TransactionService {
             LocalDateTime monthEnd = todayEnd;
             return TransactionDashboardResponse.builder()
                     .totalTransactions(repository.count())
-                    .successfulTransactions(repository.countByStatus(TransactionStatus.SUCCESS))
-                    .failedTransactions(repository.countByStatus(TransactionStatus.FAILED))
-                    .pendingTransactions(repository.countByStatus(TransactionStatus.PENDING))
-                    .pendingApprovalTransactions(repository.countByApprovalStatus(TransactionStatus.PENDING))
-                    .autoApprovedTransactions(repository.countByApprovalStatus(TransactionStatus.AUTO_APPROVED))
+                    .successfulTransactions(repository.countByTransactionStatus(TransactionStatus.SUCCESS))
+                    .failedTransactions(repository.countByTransactionStatus(TransactionStatus.FAILED))
+                    .pendingTransactions(repository.countByTransactionStatus(TransactionStatus.PENDING))
+                    .pendingApprovalTransactions(repository.countByTransactionStatus(TransactionStatus.PENDING))
+                    .autoApprovedTransactions(repository.countByTransactionStatus(TransactionStatus.AUTO_APPROVED))
                     .todayTransactions(repository.countByCreatedAtBetween(todayStart,todayEnd))
                     .todayTransferAmount(repository.getTodayTransferAmount(todayStart,todayEnd))
                     .monthlyTransferAmount(repository.getMonthlyTransferAmount(monthStart,monthEnd))
@@ -710,9 +713,6 @@ public class TransactionServiceImpl implements TransactionService {
         Map<String, Object> payload = new HashMap<>();
         payload.put("amount", request.getAmount());
 
-        /*
-         * Replace later with real customer / beneficiary data.
-         */
         payload.put("customerType", "REGULAR");
         payload.put("bankType", "EXTERNAL");
 
@@ -848,23 +848,6 @@ public class TransactionServiceImpl implements TransactionService {
                 .build();
     }
 
-    /* private void publishNotification(
-             String userId,
-             String title,
-             String message,
-             String priority) {
-
-         kafkaEventPublisher.publish(
-                 KafkaTopics.NOTIFICATION_TOPIC,
-                 NotificationEvent.builder()
-                         .userId(userId)
-                         .title(title)
-                         .message(message)
-                         .type("TRANSACTION")
-                         .priority(priority)
-                         .build()
-         );
-     }*/
     private void publishNotification(
             String userId,
             String title,
@@ -949,5 +932,19 @@ public class TransactionServiceImpl implements TransactionService {
         return ex.getMessage() == null || ex.getMessage().isBlank()
                 ? ex.getClass().getSimpleName()
                 : ex.getMessage();
+    }
+
+    private TransactionDashResponse mapToDashboardResponse(Transaction transaction) {
+
+        return TransactionDashResponse.builder()
+                .id(transaction.getId())
+                .referenceNumber(transaction.getTransactionReference())
+                .fromAccount(transaction.getSourceAccount())
+                .toAccount(transaction.getDestinationAccount())
+                .amount(transaction.getAmount())
+                .transactionType(transaction.getTransactionType().name())
+                .status(transaction.getTransactionStatus().name())
+                .transactionDate(transaction.getTransactionDate())
+                .build();
     }
 }

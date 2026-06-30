@@ -14,6 +14,10 @@ public class TransactionDashResponse {
 
     private String referenceNumber;
 
+    private String fromAccount;
+
+    private String toAccount;
+
     private BigDecimal amount;
 
     private String transactionType;

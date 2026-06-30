@@ -45,19 +45,12 @@ public class AdminTransactionController {
     }
 
     @GetMapping("/recent")
-    public List<TransactionDashResponse> recentTransactions() {
-        return service.findAllByOrderByTransactionDateDesc(PageRequest.of(0, 10))
-                .stream()
-                .map(txn -> TransactionDashResponse.builder()
-                        .id(txn.getId())
-                        .referenceNumber(txn.getTransactionReference())
-                        .amount(txn.getAmount())
-                        .transactionType(txn.getTransactionType().name())
-                        .status(txn.getTransactionStatus().name())
-                        .transactionDate(txn.getTransactionDate())
-                        .build()
-                )
-                .toList();
+    public ResponseEntity<List<TransactionDashResponse>> getRecentTransactions(
+            @RequestParam(defaultValue = "10") int limit) {
+
+        return ResponseEntity.ok(
+                service.getRecentTransactions(limit)
+        );
     }
 
     /*

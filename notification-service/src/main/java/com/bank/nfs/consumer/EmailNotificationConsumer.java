@@ -1,5 +1,7 @@
 package com.bank.nfs.consumer;
 
+import com.bank.nfs.dtos.DashboardMessage;
+import com.bank.nfs.service.DashboardPushService;
 import com.bank.nfs.service.EmailService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +17,7 @@ import com.bank.common.topics.KafkaTopics;
 public class EmailNotificationConsumer {
 
     private final EmailService emailService;
+    private final DashboardPushService  dashboardPushService;
 
     @KafkaListener(topics =KafkaTopics.EMAIL_NOTIFICATION_TOPIC,groupId ="notification-group")
     public void consume(EmailNotificationEvent event) {
@@ -25,6 +28,14 @@ public class EmailNotificationConsumer {
                             .to(event.getTo())
                             .subject(event.getSubject())
                             .body(event.getBody())
+                            .build()
+            );
+            dashboardPushService.push(
+                    DashboardMessage.builder()
+                            .type("NOTIFICATION")
+                            .action("EMAIL_NOTIFICATION")
+                            .timestamp(event.getCreatedAt())
+                            .data(event)
                             .build()
             );
         } catch (Exception ex) {

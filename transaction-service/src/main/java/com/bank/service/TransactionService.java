@@ -24,7 +24,6 @@ public interface TransactionService {
 
     List<Object[]> getMonthlyStats();
 
-    List<Transaction> findAllByOrderByTransactionDateDesc(PageRequest of);
 
     List<StatementTransactionResponse>
     findBySourceAccountAndTransactionDateBetweenOrderByTransactionDateDesc(String accountNumber,LocalDate fromDate,LocalDate toDate);
@@ -47,4 +46,6 @@ public interface TransactionService {
     List<TransactionResponse> getReversalRequiredTransactions();
 
     TransactionDashboardResponse getDashboardStats();
+
+    List<TransactionDashResponse> getRecentTransactions(int limit);
 }

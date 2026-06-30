@@ -1,9 +1,6 @@
 package com.bank.controller;
 
-import com.bank.dtos.AuditDashboardResponse;
-import com.bank.dtos.AuditLogRequest;
-import com.bank.dtos.AuditLogResponse;
-import com.bank.dtos.AuditLogSearchRequest;
+import com.bank.dtos.*;
 import com.bank.service.AuditLogService;
 import com.bank.service.CsvExportService;
 import com.bank.service.ExcelExportService;
@@ -81,5 +78,10 @@ public class AuditLogController {
                         "attachment; filename=audit_logs.pdf")
                 .contentType(MediaType.APPLICATION_PDF)
                 .body(resource);
+    }
+
+    @GetMapping("/recent")
+    public ResponseEntity<List<RecentAuditResponse>> getRecentAudits(@RequestParam(defaultValue = "10") int limit) {
+        return ResponseEntity.ok(service.getRecentAudits(limit));
     }
 }

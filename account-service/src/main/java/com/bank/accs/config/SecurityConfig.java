@@ -3,6 +3,7 @@ package com.bank.accs.config;
 import com.bank.accs.security.CustomAccessDeniedHandler;
 import com.bank.accs.security.JwtAuthenticationEntryPoint;
 import com.bank.accs.security.JwtAuthenticationFilter;
+import com.bank.common.filter.CorrelationIdFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,6 +23,7 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final JwtAuthenticationEntryPoint authenticationEntryPoint;
+    private final CorrelationIdFilter correlationIdFilter;
 
     private final CustomAccessDeniedHandler accessDeniedHandler;
 
@@ -77,8 +79,12 @@ public class SecurityConfig {
                 )
 
                 .addFilterBefore(
-                        jwtAuthenticationFilter,
+                        correlationIdFilter,
                         UsernamePasswordAuthenticationFilter.class
+                )
+                .addFilterAfter(
+                        jwtAuthenticationFilter,
+                        CorrelationIdFilter.class
                 );
 
         return http.build();

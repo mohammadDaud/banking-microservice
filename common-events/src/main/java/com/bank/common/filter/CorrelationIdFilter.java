@@ -21,30 +21,27 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
 
         String correlationId =
-                request.getHeader(
-                        CorrelationConstants.HEADER_NAME);
+                request.getHeader(CorrelationConstants.HEADER_NAME);
 
         if (correlationId == null || correlationId.isBlank()) {
-
             correlationId = UUID.randomUUID().toString();
-
         }
 
         CorrelationIdUtil.setCorrelationId(correlationId);
 
         response.setHeader(
                 CorrelationConstants.HEADER_NAME,
-                correlationId);
+                correlationId
+        );
 
         try {
 
             filterChain.doFilter(request, response);
 
         } finally {
+
             CorrelationIdUtil.clear();
-            response.setHeader(
-                    CorrelationConstants.HEADER_NAME,
-                    correlationId);
+
         }
     }
 }

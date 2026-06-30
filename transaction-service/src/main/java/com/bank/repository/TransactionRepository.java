@@ -81,7 +81,6 @@ public interface TransactionRepository extends JpaRepository<Transaction, String
             """)
     BigDecimal getTotalAmount(LocalDateTime start, LocalDateTime end);
 
-    long countByTransactionStatus(TransactionStatus status);
 
     List<Transaction> findByTransactionDateBetweenOrderByTransactionDateDesc(LocalDateTime start, LocalDateTime end);
 
@@ -120,9 +119,9 @@ public interface TransactionRepository extends JpaRepository<Transaction, String
     /*==========DASHBOARD=======*/
     long count();
 
-    long countByStatus(TransactionStatus status);
+    long countByTransactionStatus(TransactionStatus status);
 
-    long countByApprovalStatus(TransactionStatus approvalStatus);
+    //long countByApprovalStatus(TransactionStatus approvalStatus);
 
     long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
 
@@ -130,7 +129,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, String
             SELECT COALESCE(SUM(t.amount),0)
             FROM Transaction t
             WHERE t.createdAt BETWEEN :start AND :end
-            AND t.status='SUCCESS'
+            AND t.transactionStatus='SUCCESS'
             """)
     BigDecimal getTodayTransferAmount(LocalDateTime start, LocalDateTime end);
 
@@ -138,28 +137,28 @@ public interface TransactionRepository extends JpaRepository<Transaction, String
             SELECT COALESCE(SUM(t.amount),0)
             FROM Transaction t
             WHERE t.createdAt BETWEEN :start AND :end
-            AND t.status='SUCCESS'
+            AND t.transactionStatus='SUCCESS'
             """)
     BigDecimal getMonthlyTransferAmount(LocalDateTime start, LocalDateTime end);
 
     @Query("""
             SELECT COALESCE(AVG(t.amount),0)
             FROM Transaction t
-            WHERE t.status='SUCCESS'
+            WHERE t.transactionStatus='SUCCESS'
             """)
     BigDecimal getAverageTransactionAmount();
 
     @Query("""
             SELECT COALESCE(MAX(t.amount),0)
             FROM Transaction t
-            WHERE t.status='SUCCESS'
+            WHERE t.transactionStatus='SUCCESS'
             """)
     BigDecimal getHighestTransactionAmount();
 
     @Query("""
             SELECT COALESCE(MIN(t.amount),0)
             FROM Transaction t
-            WHERE t.status='SUCCESS'
+            WHERE t.transactionStatus='SUCCESS'
             """)
     BigDecimal getLowestTransactionAmount();
 }

@@ -1,6 +1,10 @@
 package com.bank.repository;
 
+import com.bank.enums.AuditAction;
+import com.bank.enums.AuditModule;
 import com.bank.model.AuditLog;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
@@ -23,5 +27,7 @@ public interface AuditLogRepository extends
 
     long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
 
-    long countByModuleAndAction(String module,String action);
+    long countByModuleAndAction(AuditModule module, AuditAction action);
+
+    Page<AuditLog> findAllByOrderByCreatedAtDesc(Pageable pageable);
 }

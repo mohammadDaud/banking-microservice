@@ -2,10 +2,7 @@ package com.bank.common.events;
 
 import com.bank.common.enums.EventSource;
 import com.bank.common.enums.EventStatus;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 import java.time.LocalDateTime;
 
@@ -13,6 +10,7 @@ import java.time.LocalDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@ToString
 public class AuditEvent {
 
     private String eventId;

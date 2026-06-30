@@ -1,10 +1,8 @@
 package com.bank.service.impl;
 
-import com.bank.dtos.AuditDashboardResponse;
-import com.bank.dtos.AuditLogRequest;
-import com.bank.dtos.AuditLogResponse;
-import com.bank.dtos.AuditLogSearchRequest;
+import com.bank.dtos.*;
 import com.bank.enums.AuditAction;
+import com.bank.enums.AuditModule;
 import com.bank.model.AuditLog;
 import com.bank.repository.AuditLogRepository;
 import com.bank.service.AuditLogService;
@@ -111,14 +109,35 @@ public class AuditLogServiceImpl implements AuditLogService {
         return AuditDashboardResponse.builder()
                 .totalAuditLogs(repository.count())
                 .todayAuditLogs(repository.countByCreatedAtBetween(start,end))
-                .loginSuccess(repository.countByModuleAndAction("AUTH","LOGIN_SUCCESS"))
-                .loginFailed(repository.countByModuleAndAction("AUTH","LOGIN_FAILED"))
-                .userRegistrations(repository.countByModuleAndAction("AUTH","REGISTERED_SUCCESS"))
-                .accountsCreated(repository.countByModuleAndAction("ACCOUNT","ACCOUNT_CREATED"))
-                .kycApproved(repository.countByModuleAndAction("KYC","KYC_APPROVED"))
-                .beneficiaryApproved(repository.countByModuleAndAction("BENEFICIARY","BENEFICIARY_APPROVED"))
-                .successfulTransactions(repository.countByModuleAndAction("TRANSACTION","TRANSFER_SUCCESS"))
-                .failedTransactions(repository.countByModuleAndAction("TRANSACTION","TRANSFER_FAILED"))
+                .loginSuccess(repository.countByModuleAndAction(AuditModule.AUTH,AuditAction.LOGIN_SUCCESS))
+                .loginFailed(repository.countByModuleAndAction(AuditModule.AUTH,AuditAction.LOGIN_FAILED))
+                .userRegistrations(repository.countByModuleAndAction(AuditModule.AUTH,AuditAction.REGISTERED_SUCCESS))
+                .accountsCreated(repository.countByModuleAndAction(AuditModule.ACCOUNT,AuditAction.ACCOUNT_CREATED))
+                .kycApproved(repository.countByModuleAndAction(AuditModule.KYC,AuditAction.KYC_APPROVED))
+                .beneficiaryApproved(repository.countByModuleAndAction(AuditModule.BENEFICIARY,AuditAction.BENEFICIARY_APPROVED))
+                .successfulTransactions(repository.countByModuleAndAction(AuditModule.TRANSACTION,AuditAction.TRANSFER_SUCCESS))
+                .failedTransactions(repository.countByModuleAndAction(AuditModule.TRANSACTION,AuditAction.TRANSFER_FAILED))
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<RecentAuditResponse> getRecentAudits(int limit) {
+        Pageable pageable = PageRequest.of(0, limit);
+        return repository
+                .findAllByOrderByCreatedAtDesc(pageable)
+                .stream()
+                .map(this::mapToRecentAudit)
+                .toList();
+    }
+
+    private RecentAuditResponse mapToRecentAudit(AuditLog audit) {
+        return RecentAuditResponse.builder()
+                .username(audit.getUsername())
+                .module(audit.getModule().name())
+                .action(audit.getAction().name())
+                .description(audit.getDescription())
+                .createdAt(audit.getCreatedAt())
                 .build();
     }
 }

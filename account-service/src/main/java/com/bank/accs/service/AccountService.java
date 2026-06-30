@@ -314,7 +314,7 @@ public class AccountService {
         return repository.count();
     }
 
-    public Long countByStatus(String status) {
+    public Long countByStatus(AccountStatus status) {
         return repository.countByAccountStatus(status);
     }
 
@@ -365,10 +365,10 @@ public class AccountService {
         LocalDateTime end = today.atTime(LocalTime.MAX);
         return AccountDashboardResponse.builder()
                 .totalAccounts(repository.count())
-                .activeAccounts(repository.countByStatus(AccountStatus.ACTIVE.name()))
-                .inactiveAccounts(repository.countByStatus(AccountStatus.INACTIVE.name()))
-                .savingsAccounts(repository.countByAccountType(AccountType.SAVINGS.name()))
-                .currentAccounts(repository.countByAccountType(AccountType.CURRENT.name()))
+                .activeAccounts(repository.countByAccountStatus(AccountStatus.ACTIVE))
+                .inactiveAccounts(repository.countByAccountStatus(AccountStatus.INACTIVE))
+                .savingsAccounts(repository.countByAccountType(AccountType.SAVINGS))
+                .currentAccounts(repository.countByAccountType(AccountType.CURRENT))
                 .totalBankBalance(repository.getTotalBankBalance())
                 .averageAccountBalance(repository.getAverageAccountBalance())
                 .accountsCreatedToday(repository.countByCreatedAtBetween(start,end))

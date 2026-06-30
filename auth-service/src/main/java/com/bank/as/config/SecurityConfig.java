@@ -1,6 +1,7 @@
 package com.bank.as.config;
 
 import com.bank.as.security.JwtAuthenticationFilter;
+import com.bank.common.filter.CorrelationIdFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -14,7 +15,6 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.client.RestTemplate;
 
 @Configuration
 @EnableWebSecurity
@@ -23,6 +23,7 @@ import org.springframework.web.client.RestTemplate;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final CorrelationIdFilter correlationIdFilter;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -35,6 +36,7 @@ public class SecurityConfig {
 
         return config.getAuthenticationManager();
     }
+
 
     @Bean
     public SecurityFilterChain securityFilterChain(
@@ -78,8 +80,12 @@ public class SecurityConfig {
                         .authenticated()
                 )
                 .addFilterBefore(
-                        jwtAuthenticationFilter,
+                        correlationIdFilter,
                         UsernamePasswordAuthenticationFilter.class
+                )
+                .addFilterAfter(
+                        jwtAuthenticationFilter,
+                        CorrelationIdFilter.class
                 );
 
         return http.build();

@@ -31,19 +31,15 @@ spring:
         format_sql: true
 
   Kafka:
-    bootstrap-servers: kafka:9092
-
+    bootstrap-servers: kafka:29092
     consumer:
       group-id: audit-group
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-
       properties:
-        spring:
-          json:
-            trusted:
-              packages: "*"
+        spring.json.trusted.packages: "*"
+        spring.json.use.type.headers: true
 
 eureka:
   client:

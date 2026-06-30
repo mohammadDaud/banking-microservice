@@ -1,9 +1,6 @@
 package com.bank.service;
 
-import com.bank.dtos.AuditDashboardResponse;
-import com.bank.dtos.AuditLogRequest;
-import com.bank.dtos.AuditLogResponse;
-import com.bank.dtos.AuditLogSearchRequest;
+import com.bank.dtos.*;
 import org.springframework.data.domain.Page;
 
 import java.util.List;
@@ -16,4 +13,6 @@ public interface AuditLogService {
     Page<AuditLogResponse> search(AuditLogSearchRequest request);
 
     AuditDashboardResponse getDashboardStats();
+
+    List<RecentAuditResponse> getRecentAudits(int limit);
 }

@@ -1,6 +1,8 @@
 package com.bank.accs.repository;
 
 import com.bank.accs.model.Account;
+import com.bank.accs.model.enums.AccountStatus;
+import com.bank.accs.model.enums.AccountType;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -37,7 +39,6 @@ public interface AccountRepository extends JpaRepository<Account, String> {
 
     List<Account> findByAvailableBalanceLessThan(BigDecimal amount);
 
-    long countByAccountStatus(String status);
 
     List<Account> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
@@ -50,20 +51,20 @@ public interface AccountRepository extends JpaRepository<Account, String> {
 
     long count();
 
-    long countByStatus(String status);
+    long countByAccountStatus(AccountStatus status);
 
-    long countByAccountType(String accountType);
+    long countByAccountType(AccountType accountType);
 
     long countByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
 
     @Query("""
-            SELECT COALESCE(SUM(a.balance),0)
+            SELECT COALESCE(SUM(a.availableBalance),0)
             FROM Account a
             """)
     BigDecimal getTotalBankBalance();
 
     @Query("""
-            SELECT COALESCE(AVG(a.balance),0)
+            SELECT COALESCE(AVG(a.availableBalance),0)
             FROM Account a
             """)
     BigDecimal getAverageAccountBalance();

@@ -1,26 +1,26 @@
-package com.bank.common.config;
+package com.bank.config;
 
 import com.bank.common.filter.CorrelationIdFilter;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.Ordered;
 
 @Configuration
-public class CorrelationAutoConfiguration {
+public class CommonFilterConfiguration {
 
     @Bean
-    public FilterRegistrationBean<CorrelationIdFilter> correlationFilter() {
+    public FilterRegistrationBean<CorrelationIdFilter> correlationIdFilter() {
 
         FilterRegistrationBean<CorrelationIdFilter> registration =
                 new FilterRegistrationBean<>();
 
         registration.setFilter(new CorrelationIdFilter());
 
-        registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
-
         registration.addUrlPatterns("/*");
+
+        registration.setOrder(1);
 
         return registration;
     }
+
 }
