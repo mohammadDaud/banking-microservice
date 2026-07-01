@@ -1,0 +1,21 @@
+package com.bank.us.client;
+
+import com.bank.us.validation.CustomerDeletionValidationResponse;
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+
+import java.util.List;
+
+@FeignClient(
+        name = "account-service"
+)
+public interface AccountClient {
+
+    @GetMapping("/api/accounts/{userId}/validation")
+    CustomerDeletionValidationResponse validateCustomerDeletion(@PathVariable String userId);
+
+    @GetMapping("/api/accounts/{customerId}/accountNumber")
+    List<String> getCustomerAccounts(@PathVariable String customerId);
+
+}

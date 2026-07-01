@@ -28,6 +28,12 @@ spring:
       hibernate:
         format_sql: true
 
+  Kafka:
+    bootstrap-servers: kafka:29092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
 jwt:
   secret: $2a$10$z3kMFnMBz8F1S3tr6dj5HerUqBNBP4wMRiPfIV1MkgeyeJcT5Monm
 

@@ -21,6 +21,10 @@ public final class KafkaTopics {
             AUDIT_LOG_TOPIC =
             "audit-log-topic";
 
+    public static final String
+            CUSTOMER_DELETED_TOPIC =
+            "customer-deleted-topic";
+
     /*public static final String
             ACCOUNT_NUMBER_GENERATED_TOPIC =
             "account-number-generated-topic";*/

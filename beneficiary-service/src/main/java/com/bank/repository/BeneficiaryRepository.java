@@ -13,9 +13,13 @@ public interface BeneficiaryRepository extends JpaRepository<Beneficiary,String>
     Long countByCustomerId(String customerId);
     List<Beneficiary> findByStatus(BeneficiaryStatus status);
 
-
     long count();
     long countByStatus(BeneficiaryStatus status);
     long countByCreatedAtBetween(LocalDateTime start,LocalDateTime end);
+
+
+    List<Beneficiary> findByBeneficiaryAccountNumberIn(List<String> accountNumbers);
+    long countByBeneficiaryAccountNumberIn(List<String> accountNumbers );
+    boolean existsByBeneficiaryAccountNumberIn(List<String> accountNumbers);
 
 }

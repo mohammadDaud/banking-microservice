@@ -5,6 +5,7 @@ import com.bank.accs.client.KycClient;
 import com.bank.accs.client.NotificationClient;
 import com.bank.accs.client.TransactionClient;
 import com.bank.accs.dtos.*;
+import com.bank.accs.exception.BadRequestException;
 import com.bank.accs.exception.ResourceNotFoundException;
 import com.bank.accs.kafka.KafkaEventPublisher;
 import com.bank.accs.model.Account;
@@ -49,7 +50,7 @@ public class AccountService {
     private final KycClient kycClient;
     private final TransactionLimitRepository transactionLimitRepository;
 
-    private static final String SERVICE_NAME = "auth-service";
+    private static final String SERVICE_NAME = "account-service";
 
     @Transactional
     public CreateAccountResponse createAccount(CreateAccountRequest request,HttpServletRequest httpServletRequest) {
@@ -58,7 +59,7 @@ public class AccountService {
                 kycClient.checkEligibility(request.getCustomerId());
 
         if (kycEligibility == null || !kycEligibility.isEligible()) {
-            throw new RuntimeException(
+            throw new BadRequestException(
                     "Account creation blocked: "
                             + (kycEligibility != null
                             ? kycEligibility.getMessage()
@@ -156,7 +157,7 @@ public class AccountService {
         validateAccountCanSendMoney(account);
 
         if (account.getAvailableBalance().compareTo(amount) < 0) {
-            throw new RuntimeException("Insufficient balance");
+            throw new BadRequestException("Insufficient balance");
         }
 
         account.setAvailableBalance(account.getAvailableBalance().subtract(amount));
@@ -199,8 +200,11 @@ public class AccountService {
 
     @Transactional
     public void freezeAccount(String accountNumber,HttpServletRequest httpServletRequest) {
-        Account account = getAccountEntity(accountNumber);
 
+        Account account = getAccountEntity(accountNumber);
+        if (account.getAccountStatus() == AccountStatus.CLOSED) {
+            throw new BadRequestException("Closed account cannot be frozen.");
+        }
         account.setAccountStatus(AccountStatus.FROZEN);
         account.setUpdatedAt(LocalDateTime.now());
 
@@ -229,7 +233,9 @@ public class AccountService {
     @Transactional
     public void unfreezeAccount(String accountNumber,HttpServletRequest httpServletRequest) {
         Account account = getAccountEntity(accountNumber);
-
+        if (account.getAccountStatus() == AccountStatus.CLOSED) {
+            throw new BadRequestException("Closed account cannot be activated.");
+        }
         account.setAccountStatus(AccountStatus.ACTIVE);
         account.setUpdatedAt(LocalDateTime.now());
 
@@ -261,10 +267,12 @@ public class AccountService {
     public void closeAccount(String accountNumber,HttpServletRequest httpServletRequest) {
         Account account = getAccountEntity(accountNumber);
 
-        if (account.getAvailableBalance().compareTo(BigDecimal.ZERO) != 0) {
-            throw new RuntimeException(
-                    "Account cannot be closed while balance is not zero"
-            );
+        if (account.getAvailableBalance().compareTo(BigDecimal.ZERO) > 0) {
+            throw new BadRequestException("Account balance must be zero before closing.");
+        }
+
+        if (account.getLedgerBalance().compareTo(BigDecimal.ZERO) > 0) {
+            throw new BadRequestException("Ledger balance must be zero before closing.");
         }
 
         account.setAccountStatus(AccountStatus.CLOSED);
@@ -337,7 +345,7 @@ public class AccountService {
             LocalDate toDate) {
 
         if (fromDate == null || toDate == null || fromDate.isAfter(toDate)) {
-            throw new RuntimeException("Invalid statement date range");
+            throw new BadRequestException("Invalid statement date range");
         }
 
         Account account = getAccountEntity(accountNumber);
@@ -401,7 +409,7 @@ public class AccountService {
 
     public String accountNumberFallback(Exception ex) {
         log.error("Account Number Service unavailable", ex);
-        throw new RuntimeException("Unable to generate account number");
+        throw new BadRequestException("Unable to generate account number");
     }
 
     public void notificationFallback(
@@ -446,25 +454,42 @@ public class AccountService {
 
     private void validateAmount(BigDecimal amount) {
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new RuntimeException("Amount must be greater than zero");
+            throw new BadRequestException("Amount must be greater than zero");
         }
     }
 
     private void validateAccountCanSendMoney(Account account) {
-        if (account.getAccountStatus() == AccountStatus.CLOSED) {
-            throw new RuntimeException("Cannot debit a closed account");
-        }
+        switch (account.getAccountStatus()) {
 
-        if (account.getAccountStatus() == AccountStatus.FROZEN) {
-            throw new RuntimeException("Cannot debit a frozen account");
+            case CLOSED -> throw new BadRequestException("Cannot debit a closed account.");
+
+            case FROZEN -> throw new BadRequestException("Cannot debit a frozen account.");
+
+            case BLOCKED -> throw new BadRequestException("Cannot debit a blocked account.");
+
+            case DORMANT -> throw new BadRequestException("Cannot debit a dormant account.");
+
+            case CLOSING -> throw new BadRequestException("Account is under closure process.");
+
+            default -> {
+            }
         }
     }
 
     private void validateAccountCanReceiveMoney(Account account) {
-        if (account.getAccountStatus() == AccountStatus.CLOSED) {
-            throw new RuntimeException("Cannot credit a closed account");
+        switch (account.getAccountStatus()) {
+
+            case CLOSED -> throw new BadRequestException("Cannot credit a closed account.");
+
+            case BLOCKED -> throw new BadRequestException("Cannot credit a blocked account.");
+
+            case CLOSING -> throw new BadRequestException("Cannot credit an account under closure.");
+
+            default -> {
+            }
         }
     }
+
     private void publishAccountAudit(
             Account account,
             String action,

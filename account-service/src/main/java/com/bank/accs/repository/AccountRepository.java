@@ -68,4 +68,41 @@ public interface AccountRepository extends JpaRepository<Account, String> {
             FROM Account a
             """)
     BigDecimal getAverageAccountBalance();
+
+
+    List<Account> findByCustomerIdAndAccountStatus(String customerId, AccountStatus accountStatus);
+
+    long countByCustomerIdAndAccountStatus(String customerId, AccountStatus accountStatus);
+
+    boolean existsByCustomerIdAndAccountStatus(String customerId, AccountStatus accountStatus);
+
+    @Query("""
+            SELECT COALESCE(SUM(a.availableBalance),0)
+            FROM Account a
+            WHERE a.customerId=:customerId
+            """)
+    BigDecimal getCustomerTotalBalance(@Param("customerId") String customerId);
+
+    @Query("""
+            SELECT COALESCE(SUM(a.ledgerBalance),0)
+            FROM Account a
+            WHERE a.customerId=:customerId
+            """)
+    BigDecimal getCustomerLedgerBalance(@Param("customerId") String customerId);
+
+    @Query("""
+            SELECT COUNT(a)
+            FROM Account a
+            WHERE a.customerId=:customerId
+            AND a.accountStatus<>'CLOSED'
+            """)
+    long countOpenAccounts(@Param("customerId") String customerId);
+
+    @Query("""
+            SELECT a.accountNumber
+            FROM Account a
+            WHERE a.customerId = :customerId
+            AND a.deleted = false
+            """)
+    List<String> findAccountNumbersByCustomerId(@Param("customerId") String customerId);
 }

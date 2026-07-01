@@ -18,4 +18,6 @@ public class DashboardStatsResponse {
     private long inactiveCustomers;
 
     private long registeredToday;
+
+    private long deletedCustomers;
 }

@@ -1,12 +1,12 @@
 package com.bank.us.model;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "addresses")
@@ -19,7 +19,12 @@ public class Address {
     @Id
     private String id;
 
-    private String userId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(
+            name = "user_id",
+            referencedColumnName = "userId"
+    )
+    private UserProfile userProfile;
 
     private String addressType;
 
@@ -34,4 +39,16 @@ public class Address {
     private String country;
 
     private String postalCode;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean deleted = false;
+
+    private LocalDateTime createdAt;
+
+    private LocalDateTime updatedAt;
+
+    private String createdBy;
+
+    private String updatedBy;
 }

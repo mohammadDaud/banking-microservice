@@ -1,12 +1,12 @@
 package com.bank.us.model;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "kyc_details")
@@ -19,7 +19,12 @@ public class KycDetail {
     @Id
     private String id;
 
-    private String userId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(
+            name = "user_id",
+            referencedColumnName = "userId"
+    )
+    private UserProfile userProfile;
 
     private String panNumber;
 
@@ -28,4 +33,10 @@ public class KycDetail {
     private String passportNumber;
 
     private String verificationStatus;
+
+    private LocalDateTime verifiedAt;
+
+    private String verifiedBy;
+
+    private String remarks;
 }

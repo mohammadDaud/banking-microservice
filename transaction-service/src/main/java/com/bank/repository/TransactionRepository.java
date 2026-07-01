@@ -161,4 +161,32 @@ public interface TransactionRepository extends JpaRepository<Transaction, String
             WHERE t.transactionStatus='SUCCESS'
             """)
     BigDecimal getLowestTransactionAmount();
+
+    long countByCustomerIdAndTransactionStatus(String customerId, TransactionStatus status);
+
+    boolean existsByCustomerIdAndTransactionStatus(String customerId, TransactionStatus status);
+
+    List<Transaction> findByCustomerIdAndTransactionStatus(String customerId, TransactionStatus status);
+
+    @Query("""
+            SELECT COUNT(t)
+            FROM Transaction t
+            WHERE t.customerId=:customerId
+            AND t.transactionStatus IN (
+                 'PENDING',
+                 'PROCESSING',
+                 'PENDING_APPROVAL',
+                 'PROCESSING_APPROVAL',
+                 'REVERSAL_REQUIRED'
+             )
+            """)
+    long countBlockingTransactions(@Param("customerId") String customerId);
+
+    @Query("""
+            SELECT COALESCE(SUM(t.amount),0)
+            FROM Transaction t
+            WHERE t.customerId=:customerId
+            AND t.transactionStatus='PENDING'
+            """)
+    BigDecimal getPendingTransactionAmount(@Param("customerId") String customerId);
 }

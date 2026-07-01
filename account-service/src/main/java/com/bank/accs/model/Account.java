@@ -46,6 +46,14 @@ public class Account {
     @Column(nullable = false)
     private BigDecimal ledgerBalance;
 
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean deleted = false;
+
+    private LocalDateTime deletedAt;
+
+    private String deletedBy;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

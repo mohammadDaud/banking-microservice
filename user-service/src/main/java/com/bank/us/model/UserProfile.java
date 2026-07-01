@@ -1,8 +1,7 @@
 package com.bank.us.model;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import com.bank.us.enums.UserStatus;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -42,9 +41,20 @@ public class UserProfile {
 
     private String maritalStatus;
 
-    private String status;
+    @Enumerated(EnumType.STRING)
+    private UserStatus status;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean deleted = false;
+
+    private LocalDateTime deletedAt;
+
+    private String deletedBy;
 
     private LocalDateTime createdAt;
+    private String createdBy;
 
+    private String updatedBy;
     private LocalDateTime updatedAt;
 }

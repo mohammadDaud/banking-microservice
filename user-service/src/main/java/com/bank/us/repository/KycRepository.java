@@ -3,5 +3,9 @@ package com.bank.us.repository;
 import com.bank.us.model.KycDetail;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-public interface KycRepository extends JpaRepository<KycDetail,String> {
+import java.util.Optional;
+
+public interface KycRepository extends JpaRepository<KycDetail, String> {
+
+    Optional<KycDetail> findByUserId(String userId);
 }

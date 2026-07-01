@@ -4,17 +4,21 @@ public enum TransactionStatus {
 
     PENDING,
 
+    PROCESSING_APPROVAL,
+
+    PENDING_APPROVAL,
+
     SUCCESS,
 
     FAILED,
 
-    REVERSAL_REQUIRED,
-
-    PENDING_APPROVAL,
-
-    PROCESSING_APPROVAL,
-
     REJECTED,
 
-    AUTO_APPROVED
+    AUTO_APPROVED,
+
+    REVERSAL_REQUIRED,
+
+    REVERSED,
+
+    CANCELLED
 }

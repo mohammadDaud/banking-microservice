@@ -38,6 +38,12 @@ public class UserProfileResponse {
 
     private String status;
 
+    private Boolean deleted;
+
+    private LocalDateTime deletedAt;
+
+    private String deletedBy;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
